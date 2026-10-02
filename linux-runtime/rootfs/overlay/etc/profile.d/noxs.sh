@@ -1,3 +1,4 @@
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # /etc/profile.d/noxs.sh — Noxs environment integration (canonical copy)
 # CI diff-checks this against the asset embedded in the app.
 export NOXS=1

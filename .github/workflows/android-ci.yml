@@ -24,13 +24,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Hosted runners ship a working sdkmanager + platform/build-tools 34;
-      # android-actions/setup-android@v3 rejects the preinstalled cmdline-tools
-      # version, so install only what is missing directly.
+      # Hosted runners ship cmdline-tools but sdkmanager may not be on PATH
+      # (and android-actions/setup-android@v3 rejects the preinstalled version),
+      # so locate it explicitly and install what the build needs.
       - name: Install NDK + CMake
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          SDKM="$(command -v sdkmanager || true)"
+          if [ -z "$SDKM" ]; then
+            SDKM="$(ls -d /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
+          fi
+          if [ -z "$SDKM" ]; then
+            echo "::error::sdkmanager not found on runner"; exit 1
+          fi
+          echo "Using sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
 
       - name: Gradle setup (official action, wrapper-free capable)
         uses: gradle/actions/setup-gradle@v3
@@ -110,8 +118,16 @@ jobs:
 
       - name: Install NDK + CMake
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          SDKM="$(command -v sdkmanager || true)"
+          if [ -z "$SDKM" ]; then
+            SDKM="$(ls -d /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
+          fi
+          if [ -z "$SDKM" ]; then
+            echo "::error::sdkmanager not found on runner"; exit 1
+          fi
+          echo "Using sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
 
       - uses: gradle/actions/setup-gradle@v3
         with:

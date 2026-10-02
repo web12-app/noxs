@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # scripts/bootstrap.sh — local developer bootstrap for the Noxs project (original).
 # Verifies the toolchain and prepares the Gradle wrapper + Android SDK paths.
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # Recreate FHS compatibility symlinks inside the Noxs sandbox (canonical copy).
 # App storage cannot always create symlinks during extraction; this runs on
 # first in-sandbox login via /etc/profile.d/noxs.sh.

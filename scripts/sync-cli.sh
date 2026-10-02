@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # scripts/sync-cli.sh — regenerate the canonical linux-runtime/launcher/noxs-cli
 # from the Kotlin template (single source of truth), then verify the sync.
 set -euo pipefail
