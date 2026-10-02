@@ -36,7 +36,7 @@ object NoxsDeviceCapabilities {
             androidSdkInt = Build.VERSION.SDK_INT,
             detail = mapOf(
                 "device" to "${Build.MANUFACTURER} ${Build.MODEL}",
-                "kernel" to System.getProperty("os.version") ?: "unknown",
+                "kernel" to (System.getProperty("os.version") ?: "unknown"),
                 "proot" to if (paths.prootBinary.isFile) "present" else "not bootstrapped"
             )
         )
