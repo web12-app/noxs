@@ -147,7 +147,7 @@ class RootfsExtractor(private val root: File) {
     }
 
     private fun applyMode(file: File, mode: Int) {
-        val clean = mode and 0b000_777
+        val clean = mode and 0b111111111
         try {
             if (clean and 0b100_000_000 != 0) file.setExecutable(true, false)
             file.setReadable(true, false)
@@ -196,7 +196,7 @@ class TarReader(private val input: InputStream) {
                 return
             }
             var name = parseString(header, 0, 100)
-            val mode = parseOctal(header, 100, 8) and 0b111_111_111
+            val mode = (parseOctal(header, 100, 8) and 0b111_111_111).toInt()
             val size = parseOctal(header, 124, 12)
             val typeFlag = header[156].toInt() and 0xff
             val linkName = parseString(header, 157, 100)
@@ -305,7 +305,7 @@ class TarReader(private val input: InputStream) {
         return result
     }
 
-    private class LimitedInputStream(src: InputStream, private val limit: Long) : InputStream() {
+    private class LimitedInputStream(private val src: InputStream, private val limit: Long) : InputStream() {
         private var remaining = limit
         override fun read(): Int {
             if (remaining <= 0) return -1
