@@ -17,7 +17,51 @@ data class ServiceConfig(
     /** pid files live in the sandbox runtime dir; the name must be safe. */
     val pidFilePath: String get() = "${NoxsConstants.NOXS_RUN_DIR}/$name.pid"
 
+    fun toDefinition(): ServiceDefinition = ServiceDefinition(
+        name = name, command = command, user = user,
+        description = desc, autoRestart = autoRestart
+    )
+
     companion object {
+
+        /**
+         * Loads every safe service definition from <rootfs>/etc/noxs/services/.
+         * Missing directory or unparseable files are skipped (never fatal).
+         */
+        fun loadAll(rootfsPath: String): List<ServiceDefinition> {
+            val dir = java.io.File(rootfsPath, NoxsConstants.NOXS_SERVICE_DIR.removePrefix("/"))
+            if (!dir.isDirectory) return emptyList()
+            val out = mutableListOf<ServiceDefinition>()
+            val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".conf") } ?: return emptyList()
+            for (f in files.sortedBy { it.name }) {
+                val name = f.name.removeSuffix(".conf")
+                if (!isServiceNameSafe(name)) continue
+                try {
+                    out += parse(name, f.readText()).toDefinition()
+                } catch (_: IllegalArgumentException) {
+                    // skip malformed definition
+                }
+            }
+            return out
+        }
+    }
+)
+
+/** UI-facing immutable view of a service definition. */
+data class ServiceDefinition(
+    val name: String,
+    val command: String,
+    val user: String,
+    val description: String,
+    val autoRestart: Boolean
+)
+
+/** Snapshot of a service's runtime status (app-side probing only). */
+data class ServiceStatus(
+    val definition: ServiceDefinition,
+    val running: Boolean,
+    val pid: Int
+)
         private val NAME_RE = Regex("^[a-z0-9][a-z0-9_-]{0,63}$")
 
         fun isServiceNameSafe(name: String): Boolean = NAME_RE.matches(name)

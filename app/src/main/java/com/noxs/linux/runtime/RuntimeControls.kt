@@ -91,7 +91,7 @@ class UserManagerControl(
             val p = pb.start()
             p.outputStream.use {
                 it.write("${name}:".toByteArray())
-                it.write(password)
+                it.write(String(password).toByteArray())
                 it.write('\n'.code)
                 it.flush()
             }
@@ -120,7 +120,7 @@ class ServiceManagerControl(private val exec: OneShotExecutor, private val paths
     suspend fun statuses(): List<ServiceStatus> =
         definitions().map { def ->
             val r = exec.runShell("noxs-service status ${ShellUtil.quote(def.name)} 2>/dev/null")
-            ServiceStatus(def, running = r.success, pid = r.stdout.trim().filter { it.isDigit() }.toIntOrNull() ?: 0)
+            ServiceStatus(definition = def, running = r.success, pid = r.stdout.trim().filter { it.isDigit() }.toIntOrNull() ?: 0)
         }
 
     suspend fun control(action: String, name: String): OneShotExecutor.Result {

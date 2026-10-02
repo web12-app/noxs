@@ -10,6 +10,7 @@ import com.noxs.linux.MainLoop
 import com.noxs.linux.shared.NoxsConstants
 import com.noxs.linux.shared.NoxsLog
 import com.noxs.linux.terminal.emulator.TerminalSession
+import com.noxs.linux.terminal.emulator.TerminalSessionClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -17,7 +18,7 @@ class NoxsSessionManager(
     private val paths: NoxsPaths,
     private val launcher: ProotLauncher,
     private val resources: NoxsResources
-) : TerminalSession.TerminalSessionClient {
+) : TerminalSessionClient {
 
     data class Entry(
         val session: TerminalSession,
@@ -32,7 +33,7 @@ class NoxsSessionManager(
     private val quota get() = resources.load()
 
     /** Set by NoxsService to route emulator callbacks to the UI. */
-    var client: TerminalSession.TerminalSessionClient? = null
+    var client: TerminalSessionClient? = null
 
     fun createSession(label: String, loginAsRoot: Boolean = false): Result<Entry> {
         if (_sessions.value.size >= quota.maxSessions) {

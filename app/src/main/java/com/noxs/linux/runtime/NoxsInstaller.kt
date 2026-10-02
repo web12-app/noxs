@@ -273,7 +273,7 @@ class NoxsInstaller(
             val proc = pb.start()
             proc.outputStream.use {
                 it.write("${NoxsConstants.DEFAULT_USER}:".toByteArray())
-                it.write(password)
+                it.write(String(password).toByteArray())
                 it.write('\n'.code)
                 it.flush()
             }
