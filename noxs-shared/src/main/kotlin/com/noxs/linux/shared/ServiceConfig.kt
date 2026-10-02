@@ -23,6 +23,9 @@ data class ServiceConfig(
     )
 
     companion object {
+        private val NAME_RE = Regex("^[a-z0-9][a-z0-9_-]{0,63}$")
+
+        fun isServiceNameSafe(name: String): Boolean = NAME_RE.matches(name)
 
         /**
          * Loads every safe service definition from <rootfs>/etc/noxs/services/.
@@ -34,37 +37,16 @@ data class ServiceConfig(
             val out = mutableListOf<ServiceDefinition>()
             val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".conf") } ?: return emptyList()
             for (f in files.sortedBy { it.name }) {
-                val name = f.name.removeSuffix(".conf")
-                if (!isServiceNameSafe(name)) continue
+                val base = f.name.removeSuffix(".conf")
+                if (!isServiceNameSafe(base)) continue
                 try {
-                    out += parse(name, f.readText()).toDefinition()
+                    out += parse(base, f.readText()).toDefinition()
                 } catch (_: IllegalArgumentException) {
                     // skip malformed definition
                 }
             }
             return out
         }
-    }
-)
-
-/** UI-facing immutable view of a service definition. */
-data class ServiceDefinition(
-    val name: String,
-    val command: String,
-    val user: String,
-    val description: String,
-    val autoRestart: Boolean
-)
-
-/** Snapshot of a service's runtime status (app-side probing only). */
-data class ServiceStatus(
-    val definition: ServiceDefinition,
-    val running: Boolean,
-    val pid: Int
-)
-        private val NAME_RE = Regex("^[a-z0-9][a-z0-9_-]{0,63}$")
-
-        fun isServiceNameSafe(name: String): Boolean = NAME_RE.matches(name)
 
         fun parse(name: String, text: String): ServiceConfig {
             require(isServiceNameSafe(name)) { "unsafe service name: $name" }
@@ -93,3 +75,19 @@ data class ServiceStatus(
         }
     }
 }
+
+/** UI-facing immutable view of a service definition. */
+data class ServiceDefinition(
+    val name: String,
+    val command: String,
+    val user: String,
+    val description: String,
+    val autoRestart: Boolean
+)
+
+/** Snapshot of a service's runtime status (app-side probing only). */
+data class ServiceStatus(
+    val definition: ServiceDefinition,
+    val running: Boolean,
+    val pid: Int
+)

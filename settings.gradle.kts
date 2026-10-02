@@ -16,6 +16,13 @@ pluginManagement {
     }
 }
 
+plugins {
+    // Lets Gradle auto-provision the JDK 17 toolchain required by the JVM
+    // modules (kotlin jvmToolchain(17)) when the host JDK differs.
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
+}
+
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {

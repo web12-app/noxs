@@ -16,14 +16,17 @@ object KeyHandler {
         val alt = mods and MOD_ALT != 0
         val shift = mods and MOD_SHIFT != 0
 
-        // Ctrl+letter → C0 controls (Ctrl+I is TAB, Ctrl+M is CR, etc.)
-        if (ctrl && code in 'a'.code..'z'.code) {
-            val b = (code - 'a'.code + 1).toByte()
+        // Ctrl+letter → C0 controls. Android letter keycodes are 29..54
+        // (KEYCODE_A..KEYCODE_Z), mapping to ASCII 'a'..'z' by adding 68.
+        // Ctrl+C (KEYCODE_C = 31) yields ETX (0x03), etc.
+        if (ctrl && code in 29..54) {
+            val b = (code + 68 - 'a'.code + 1).toByte()
             return withAlt(alt, byteArrayOf(b))
         }
-        if (ctrl && code in '@'.code..'_'.code && code != '@'.code) {
-            val b = (code - '@'.code).toByte()
-            return withAlt(alt, byteArrayOf(b))
+        if (ctrl || shift) {
+            // modifiedArrow already encodes the xterm modifier parameter;
+            // do not stack an extra ESC prefix on top of it.
+            modifiedArrow(code, ctrl, shift, appCursor)?.let { return it }
         }
 
         val seq: ByteArray? = when (code) {
