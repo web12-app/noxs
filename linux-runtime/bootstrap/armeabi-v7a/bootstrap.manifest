@@ -8,10 +8,11 @@
     "sizeBytes": 0
   },
   "proot": {
-    "url": "https://github.com/proot-me/proot/releases/download/v5.4.0/proot-v5.4.0-armv7l-static",
-    "sha256": ""
+    "url": "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.96_arm.deb",
+    "sha256": "19cd0aa78583e46075381398f23f8ee3647e61f166b5d02a487d99312d4ea51d",
+    "note": "proot is bundled in the APK as libnoxs-proot.so (jniLibs, exec-allowed); this URL documents provenance and serves as a legacy fallback only."
   },
   "generatedAt": "",
-  "source": "scripts/build-rootfs.sh",
+  "source": "scripts/build-rootfs.sh + scripts/bundle-proot.py",
   "note": "EXPERIMENTAL: ARM64 is the primary Noxs target; verify the proot asset name for your release."
 }

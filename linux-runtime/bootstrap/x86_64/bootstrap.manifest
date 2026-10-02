@@ -8,9 +8,10 @@
     "sizeBytes": 0
   },
   "proot": {
-    "url": "https://github.com/proot-me/proot/releases/download/v5.4.0/proot-v5.4.0-x86_64-static",
-    "sha256": ""
+    "url": "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.96_x86_64.deb",
+    "sha256": "77ea45540071ca543adda2b51aca2bc3761c52904d013fd0890682288eff9455",
+    "note": "proot is bundled in the APK as libnoxs-proot.so (jniLibs, exec-allowed); this URL documents provenance and serves as a legacy fallback only."
   },
   "generatedAt": "",
-  "source": "scripts/build-rootfs.sh"
+  "source": "scripts/build-rootfs.sh + scripts/bundle-proot.py"
 }
