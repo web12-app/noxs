@@ -15,7 +15,7 @@ class RootfsExtractorTest {
 
     // ---------- Minimal tar builder (test helper) ----------
 
-    private fun tarHeader(name: String, size: Long, typeFlag: Byte, mode: Int = 0b100_644,
+    private fun tarHeader(name: String, size: Long, typeFlag: Byte, mode: Int = 420 /* octal 0644 */,
                           linkName: String = ""): ByteArray {
         val h = ByteArray(512)
         fun put(s: String, off: Int, len: Int) {
@@ -55,7 +55,7 @@ class RootfsExtractorTest {
         return out.toByteArray()
     }
 
-    private fun fileEntry(name: String, content: String, mode: Int = 0b100_644) =
+    private fun fileEntry(name: String, content: String, mode: Int = 420 /* octal 0644 */) =
         tarHeader(name, content.length.toLong(), '0'.code.toByte(), mode) to content.toByteArray()
 
     private fun dirEntry(name: String) = tarHeader("$name/", 0, '5'.code.toByte()) to ByteArray(0)
@@ -75,7 +75,7 @@ class RootfsExtractorTest {
         val tar = tarEntries(
             dirEntry("etc"),
             fileEntry("etc/profile", "# profile\n"),
-            fileEntry("bin/sh", "#!/bin/sh\n", mode = 0b111_755)
+            fileEntry("bin/sh", "#!/bin/sh\n", mode = 493 /* octal 0755 */)
         )
         val root = tmp.newFolder("rootfs")
         RootfsExtractor(root).extract(writeGzip(tar))
