@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="noxs_background">#FF10141A</color>
+    <color name="noxs_surface">#FF1A1F27</color>
+    <color name="noxs_surface_alt">#FF232A35</color>
+    <color name="noxs_primary">#FF3DDC84</color>
+    <color name="noxs_on_primary">#FF04120A</color>
+    <color name="noxs_text">#FFE6E6E6</color>
+    <color name="noxs_text_dim">#FF9AA3AF</color>
+    <color name="noxs_accent">#FF6EA8FE</color>
+    <color name="noxs_error">#FFFF6B6B</color>
+    <color name="noxs_ok">#FF3DDC84</color>
+    <color name="noxs_warn">#FFFFC857</color>
+    <color name="ic_launcher_background">#FF10141A</color>
+</resources>

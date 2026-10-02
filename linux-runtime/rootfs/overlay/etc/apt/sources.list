@@ -1,0 +1,4 @@
+# /etc/apt/sources.list — Noxs sandbox (Debian 12 bookworm, canonical copy)
+deb https://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb https://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+deb https://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware

@@ -1,0 +1,118 @@
+#!/bin/bash
+# noxs-service — lightweight service manager for the Noxs userspace (original).
+# Definitions: /etc/noxs/services/<name>.conf
+#   COMMAND=…    (required) full command line
+#   USER=…       (default root) informational; services run in the sandbox
+#   DESC=…       human description
+#   AUTO_RESTART=yes|no
+# State: pidfiles in /var/run/noxs/, logs in /var/log/noxs/
+# Usage: noxs-service start|stop|restart|status <name> | status (all) | list
+
+set -u
+SVC_DIR="/etc/noxs/services"
+RUN_DIR="/var/run/noxs"
+LOG_DIR="/var/log/noxs"
+
+msg() { printf 'noxs-service: %s\n' "$*"; }
+err() { printf 'noxs-service: %s\n' "$*" >&2; }
+
+safe_name() {
+    case "$1" in
+        *[!a-z0-9-]*|"") return 1 ;;
+    esac
+    return 0
+}
+
+def_file() { echo "$SVC_DIR/$1.conf"; }
+
+load_command() {
+    name="$1"
+    [ -r "$(def_file "$name")" ] || { err "unknown service: $name"; return 1; }
+    # COMMAND= may contain spaces and quotes; source only the trusted conf dir
+    COMMAND=""
+    . "$(def_file "$name")"
+    [ -n "${COMMAND:-}" ] || { err "COMMAND missing in $(def_file "$name")"; return 1; }
+    return 0
+}
+
+is_running() {
+    [ -f "$RUN_DIR/$1.pid" ] && kill -0 "$(cat "$RUN_DIR/$1.pid")" 2>/dev/null
+}
+
+svc_start() {
+    name="$1"
+    safe_name "$name" || { err "bad service name"; return 2; }
+    load_command "$name" || return 1
+    if is_running "$name"; then
+        msg "$name already running (pid $(cat "$RUN_DIR/$name.pid"))"
+        return 0
+    fi
+    mkdir -p "$RUN_DIR" "$LOG_DIR"
+    (
+        ulimit -u "${MAX_PROCESSES:-256}" 2>/dev/null
+        nohup /bin/bash -c "$COMMAND" >> "$LOG_DIR/$name.log" 2>&1
+    ) &
+    echo $! > "$RUN_DIR/$name.pid"
+    sleep 1
+    if is_running "$name"; then
+        msg "$name started (pid $(cat "$RUN_DIR/$name.pid"))"
+    else
+        err "$name failed to start — see $LOG_DIR/$name.log"
+        rm -f "$RUN_DIR/$name.pid"
+        return 1
+    fi
+}
+
+svc_stop() {
+    name="$1"
+    safe_name "$name" || { err "bad service name"; return 2; }
+    if is_running "$name"; then
+        pid="$(cat "$RUN_DIR/$name.pid")"
+        kill "$pid" 2>/dev/null
+        for _ in 1 2 3 4 5; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+        done
+        kill -9 "$pid" 2>/dev/null || true
+        msg "$name stopped"
+    else
+        msg "$name not running"
+    fi
+    rm -f "$RUN_DIR/$name.pid"
+}
+
+svc_status_one() {
+    name="$1"
+    if is_running "$name"; then
+        echo "$name: running (pid $(cat "$RUN_DIR/$name.pid"))"
+        return 0
+    fi
+    echo "$name: stopped"
+    return 3
+}
+
+svc_status_all() {
+    rc=0
+    for f in "$SVC_DIR"/*.conf; do
+        [ -e "$f" ] || { echo "no services defined in $SVC_DIR"; return 0; }
+        name="$(basename "$f" .conf)"
+        svc_status_one "$name" || rc=$?
+    done
+    return $rc
+}
+
+case "${1:-}" in
+    start)   svc_start "${2:-}" ;;
+    stop)    svc_stop "${2:-}" ;;
+    restart) svc_stop "${2:-}"; svc_start "${2:-}" ;;
+    status)
+        if [ $# -ge 2 ]; then svc_status_one "$2"; else svc_status_all; fi
+        ;;
+    list)
+        for f in "$SVC_DIR"/*.conf; do [ -e "$f" ] && basename "$f" .conf; done 2>/dev/null
+        ;;
+    *)
+        err "usage: noxs-service start|stop|restart|status [name] | list"
+        exit 2
+        ;;
+esac

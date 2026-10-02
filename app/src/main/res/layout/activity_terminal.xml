@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/drawer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/noxs_background">
+
+    <!-- Terminal column: status widget + terminal + extra keys -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Resource status bar widget -->
+        <LinearLayout
+            android:id="@+id/status_bar"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:background="@color/noxs_surface">
+
+            <View
+                android:id="@+id/status_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@color/noxs_ok" />
+
+            <TextView
+                android:id="@+id/status_session"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                style="@style/Text.Noxs.Mono"
+                android:text="@string/app_name" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/status_cpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                style="@style/Text.Noxs.Mono"
+                android:text="CPU 0%" />
+
+            <TextView
+                android:id="@+id/status_mem"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                style="@style/Text.Noxs.Mono"
+                android:text="MEM 0 MB" />
+
+            <TextView
+                android:id="@+id/status_storage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                style="@style/Text.Noxs.Mono"
+                android:text="0 MB" />
+        </LinearLayout>
+
+        <com.noxs.linux.terminal.view.TerminalView
+            android:id="@+id/terminal"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:focusable="true"
+            android:focusableInTouchMode="true" />
+
+        <com.noxs.linux.terminal.view.NoxsExtraKeysBar
+            android:id="@+id/extra_keys"
+            android:layout_width="match_parent"
+            android:layout_height="44dp" />
+    </LinearLayout>
+
+    <!-- Drawer -->
+    <com.google.android.material.navigation.NavigationView
+        android:id="@+id/nav_view"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@color/noxs_surface">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="16dp"
+                android:text="@string/drawer_sessions"
+                style="@style/Text.Noxs.Title" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_new_session"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="@string/drawer_new_session"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_new_root"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:text="@string/drawer_new_root_session"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/session_list"
+                android:layout_width="match_parent"
+                android:layout_height="180dp"
+                android:padding="8dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/noxs_surface_alt" />
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingBottom="24dp">
+
+                    <TextView android:id="@+id/nav_files" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_files" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_packages" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_packages" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_users" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_users" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_processes" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_processes" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_services" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_services" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_env" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_env" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_storage" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_storage" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_security" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_security" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_settings" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_settings" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_diagnostics" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_diagnostics" android:textSize="15sp" />
+                    <TextView android:id="@+id/nav_about" style="@style/Text.Noxs.Mono" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp" android:text="@string/nav_about" android:textSize="15sp" />
+                </LinearLayout>
+            </ScrollView>
+        </LinearLayout>
+    </com.google.android.material.navigation.NavigationView>
+</androidx.drawerlayout.widget.DrawerLayout>

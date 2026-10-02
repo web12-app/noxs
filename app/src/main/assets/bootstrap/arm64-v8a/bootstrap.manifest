@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "arch": "arm64-v8a",
+  "rootfs": {
+    "url": "https://github.com/debuerreotype/docker-debian-artifacts/raw/dist-arm64v8/bookworm/rootfs.tar.xz",
+    "sha256": "",
+    "format": "tar.xz",
+    "sizeBytes": 0
+  },
+  "proot": {
+    "url": "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.96_aarch64.deb",
+    "sha256": "8199dca06dccb693ec09fb1759e3e1ad08b4863f0c11c612f89c20bd9ecdc1a0",
+    "note": "proot is bundled in the APK as libnoxs-proot.so (jniLibs, exec-allowed); this URL documents provenance and serves as a legacy fallback only."
+  },
+  "generatedAt": "",
+  "source": "scripts/build-rootfs.sh + scripts/bundle-proot.py"
+}

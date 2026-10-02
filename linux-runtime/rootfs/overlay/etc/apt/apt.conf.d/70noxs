@@ -1,0 +1,5 @@
+// Noxs sandbox apt tuning (canonical copy; isolated to the Noxs rootfs)
+APT::Install-Recommends "false";
+APT::Get::AllowUnauthenticated "false";
+Acquire::Languages "none";
+Dir::Cache::archives "/var/cache/apt/archives";

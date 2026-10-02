@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "arch": "arm64-v8a",
+  "rootfs": {
+    "url": "https://github.com/debuerreotype/docker-debian-artifacts/raw/dist-arm64v8/bookworm/rootfs.tar.xz",
+    "sha256": "",
+    "format": "tar.xz",
+    "sizeBytes": 0
+  },
+  "proot": {
+    "url": "https://github.com/proot-me/proot/releases/download/v5.4.0/proot-v5.4.0-aarch64-static",
+    "sha256": ""
+  },
+  "generatedAt": "",
+  "source": "scripts/build-rootfs.sh"
+}

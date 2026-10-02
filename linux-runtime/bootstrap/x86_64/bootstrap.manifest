@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "arch": "x86_64",
+  "rootfs": {
+    "url": "https://github.com/debuerreotype/docker-debian-artifacts/raw/dist-amd64/bookworm/rootfs.tar.xz",
+    "sha256": "",
+    "format": "tar.xz",
+    "sizeBytes": 0
+  },
+  "proot": {
+    "url": "https://github.com/proot-me/proot/releases/download/v5.4.0/proot-v5.4.0-x86_64-static",
+    "sha256": ""
+  },
+  "generatedAt": "",
+  "source": "scripts/build-rootfs.sh"
+}
