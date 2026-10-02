@@ -1,5 +1,10 @@
 name: android-ci
 
+# The release job publishes the signed APK with the workflow's GITHUB_TOKEN,
+# which needs contents:write (defaults to read-only otherwise).
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ main, master ]
