@@ -217,33 +217,33 @@ class TerminalEmulator(
 
     private fun esc(b: Int) {
         when (b) {
-            '[' -> { state = State.CSI_PARAM; csiParams.setLength(0); csiIntermediates.setLength(0); csiPrivate = 0 }
-            ']' -> { state = State.OSC; oscBuffer.setLength(0) }
-            '(' -> { charsetDesignate = 0; state = State.CHARSET }
-            ')' -> { charsetDesignate = 1; state = State.CHARSET }
-            '7' -> { buffer.saveCursor(); state = State.GROUND }
-            '8' -> { buffer.restoreCursor(); state = State.GROUND }
-            'D' -> { lineFeed(); state = State.GROUND }
-            'E' -> { buffer.cursorCol = 0; lineFeed(); state = State.GROUND }
-            'M' -> { reverseLineFeed(); state = State.GROUND }
-            'c' -> { fullReset(); state = State.GROUND }
-            '#' -> { escIntermediate = '#'; state = State.ESC_INTERMEDIATE }
-            '=' -> { state = State.GROUND } // keypad app mode: no-op
-            '>' -> { state = State.GROUND }
+            0x5b -> { state = State.CSI_PARAM; csiParams.setLength(0); csiIntermediates.setLength(0); csiPrivate = 0 }
+            0x5d -> { state = State.OSC; oscBuffer.setLength(0) }
+            0x28 -> { charsetDesignate = 0; state = State.CHARSET }
+            0x29 -> { charsetDesignate = 1; state = State.CHARSET }
+            0x37 -> { buffer.saveCursor(); state = State.GROUND }
+            0x38 -> { buffer.restoreCursor(); state = State.GROUND }
+            0x44 -> { lineFeed(); state = State.GROUND }
+            0x45 -> { buffer.cursorCol = 0; lineFeed(); state = State.GROUND }
+            0x4d -> { reverseLineFeed(); state = State.GROUND }
+            0x63 -> { fullReset(); state = State.GROUND }
+            0x23 -> { escIntermediate = '#'.code; state = State.ESC_INTERMEDIATE }
+            0x3d -> { state = State.GROUND } // keypad app mode: no-op
+            0x3e -> { state = State.GROUND }
             in 0x20..0x2f -> { escIntermediate = b; state = State.ESC_INTERMEDIATE }
             else -> state = State.GROUND
         }
     }
 
     private fun escIntermediate(b: Int) {
-        if (escIntermediate == '#' && b == '8') {
+        if (escIntermediate == '#'.code && b == '8'.code) {
             decAlignmentTest()
         }
         state = State.GROUND
     }
 
     private fun charset(b: Int) {
-        val design = if (b == '0') 1 else 0
+        val design = if (b == '0'.code) 1 else 0
         if (charsetDesignate == 0) { buffer.charsetG0 = design; buffer.charsetActive = design } else buffer.charsetG1 = design
         state = State.GROUND
     }
@@ -270,8 +270,8 @@ class TerminalEmulator(
 
     private fun csiParam(b: Int) {
         when (b) {
-            in '0'..'9', ';', ':' -> csiParams.append(b.toChar())
-            '?', '>', '<', '=' -> csiPrivate = b
+            in '0'.code..'9'.code, ';'.code, ':'.code -> csiParams.append(b.toChar())
+            '?'.code, '>'.code, '<'.code, '='.code -> csiPrivate = b
             else -> { state = State.CSI_INTERMEDIATE; csiIntermediate(b) }
         }
     }
@@ -301,59 +301,59 @@ class TerminalEmulator(
         val buf = buffer
         val n = paramAt(0, 1)
         when (final) {
-            '@' -> insertChars(n)
-            'A' -> buf.cursorRow = (buf.cursorRow - n).coerceAtLeast(if (buf.originMode) buf.topMargin else 0)
-            'B', 'e' -> buf.cursorRow = (buf.cursorRow + n).coerceAtMost(if (buf.originMode) buf.bottomMargin else buf.rows - 1)
-            'C', 'a' -> buf.cursorCol = (buf.cursorCol + n).coerceAtMost(buf.cols - 1)
-            'D' -> buf.cursorCol = (buf.cursorCol - n).coerceAtLeast(0)
-            'E' -> { buf.cursorRow = (buf.cursorRow + n).coerceAtMost(buf.rows - 1); buf.cursorCol = 0 }
-            'F' -> { buf.cursorRow = (buf.cursorRow - n).coerceAtLeast(0); buf.cursorCol = 0 }
-            'G', '`' -> buf.cursorCol = (n - 1).coerceIn(0, buf.cols - 1)
-            'H', 'f' -> {
+            0x40 -> insertChars(n)
+            0x41 -> buf.cursorRow = (buf.cursorRow - n).coerceAtLeast(if (buf.originMode) buf.topMargin else 0)
+            0x42, 0x65 -> buf.cursorRow = (buf.cursorRow + n).coerceAtMost(if (buf.originMode) buf.bottomMargin else buf.rows - 1)
+            0x43, 0x61 -> buf.cursorCol = (buf.cursorCol + n).coerceAtMost(buf.cols - 1)
+            0x44 -> buf.cursorCol = (buf.cursorCol - n).coerceAtLeast(0)
+            0x45 -> { buf.cursorRow = (buf.cursorRow + n).coerceAtMost(buf.rows - 1); buf.cursorCol = 0 }
+            0x46 -> { buf.cursorRow = (buf.cursorRow - n).coerceAtLeast(0); buf.cursorCol = 0 }
+            0x47, 0x60 -> buf.cursorCol = (n - 1).coerceIn(0, buf.cols - 1)
+            0x48, 0x66 -> {
                 val row = paramAt(0, 1) - 1
                 val col = paramAt(1, 1) - 1
                 setCursorPosition(col, row)
             }
-            'I' -> repeat(n.coerceAtMost(16)) { // CHT → tab forward
+            0x49 -> repeat(n.coerceAtMost(16)) { // CHT → tab forward
                 do {
                     if (buffer.cursorCol >= buffer.cols - 1) break
                     buffer.cursorCol++
                 } while (!tabStopAt(buffer.cursorCol))
             }
-            'J' -> eraseDisplay(n)
-            'K' -> eraseLine(n)
-            'L' -> if (inScrollRegion()) buf.insertLines(n)
-            'M' -> if (inScrollRegion()) buf.deleteLines(n)
-            'P' -> deleteChars(n)
-            'S' -> buf.scrollUp(n)
-            'T' -> buf.scrollDown(n)
-            'X' -> eraseChars(n)
-            'Z' -> repeat(n.coerceAtMost(16)) { // CBT → tab back
+            0x4a -> eraseDisplay(n)
+            0x4b -> eraseLine(n)
+            0x4c -> if (inScrollRegion()) buf.insertLines(n)
+            0x4d -> if (inScrollRegion()) buf.deleteLines(n)
+            0x50 -> deleteChars(n)
+            0x53 -> buf.scrollUp(n)
+            0x54 -> buf.scrollDown(n)
+            0x58 -> eraseChars(n)
+            0x5a -> repeat(n.coerceAtMost(16)) { // CBT → tab back
                 do { if (buf.cursorCol > 0) buf.cursorCol-- } while (buf.cursorCol > 0 && !tabStopAt(buf.cursorCol))
             }
-            'b' -> { /* REP: rarely used — ignore */ }
-            'c' -> client.onReply("\u001b[?62;6c".toByteArray()) // DA → VT220-ish
-            'd' -> buf.cursorRow = (n - 1).coerceIn(0, buf.rows - 1)
-            'g' -> when (n) {
+            0x62 -> { /* REP: rarely used — ignore */ }
+            0x63 -> client.onReply("\u001b[?62;6c".toByteArray()) // DA → VT220-ish
+            0x64 -> buf.cursorRow = (n - 1).coerceIn(0, buf.rows - 1)
+            0x67 -> when (n) {
                 0 -> if (buf.cursorCol < tabStops.size) tabStops[buf.cursorCol] = false
                 3 -> java.util.Arrays.fill(tabStops, false)
             }
-            'h' -> setModes(reset = false)
-            'l' -> setModes(reset = true)
-            'm' -> selectGraphicRendition()
-            'n' -> when (n) {
+            0x68 -> setModes(reset = false)
+            0x6c -> setModes(reset = true)
+            0x6d -> selectGraphicRendition()
+            0x6e -> when (n) {
                 5 -> client.onReply("\u001b[0n".toByteArray())
                 6 -> client.onReply("\u001b[${buf.cursorRow + 1};${buf.cursorCol + 1}R".toByteArray())
             }
-            'r' -> {
+            0x72 -> {
                 val top = (paramAt(0, 1) - 1).coerceIn(0, buf.rows - 1)
                 val bottom = (paramAt(1, buf.rows) - 1).coerceIn(top, buf.rows - 1)
                 buf.topMargin = top
                 buf.bottomMargin = bottom
                 setCursorPosition(0, if (buf.originMode) top else 0)
             }
-            's' -> buf.saveCursor()
-            'u' -> buf.restoreCursor()
+            0x73 -> buf.saveCursor()
+            0x75 -> buf.restoreCursor()
         }
     }
 
@@ -444,7 +444,7 @@ class TerminalEmulator(
 
     private fun setModes(reset: Boolean) {
         val values = csiParams.toString().split(';').mapNotNull { it.toIntOrNull() }
-        if (csiPrivate == '?') {
+        if (csiPrivate == 0x3f) {
             for (m in values) when (m) {
                 1 -> appCursorKeys = !reset
                 6 -> buffer.originMode = !reset
@@ -540,7 +540,7 @@ class TerminalEmulator(
         when {
             b == BEL -> { finishOsc(); state = State.GROUND }
             b == ESC -> { /* expect ST (ESC \) */ oscBuffer.append('\u001b'); }
-            b == '\\' && oscBuffer.endsWith("\u001b") -> {
+            b == 0x5c && oscBuffer.endsWith("\u001b") -> {
                 oscBuffer.setLength(oscBuffer.length - 1)
                 finishOsc(); state = State.GROUND
             }

@@ -5,6 +5,7 @@
  */
 package com.noxs.linux.terminal.emulator
 
+import com.noxs.linux.shared.NoxsConstants
 import com.noxs.linux.shared.NoxsLog
 import java.io.File
 import java.io.InputStream
@@ -57,7 +58,7 @@ interface TerminalSessionClient {
 class TerminalSession(
     val label: String,
     private val client: TerminalSessionClient,
-    scrollbackLines: Int = NoxsScrollbackDefault
+    scrollbackLines: Int = NoxsConstants.DEFAULT_SCROLLBACK
 ) : TerminalEmulator.Client {
 
     val emulator = TerminalEmulator(this, 80, 24, scrollbackLines)
