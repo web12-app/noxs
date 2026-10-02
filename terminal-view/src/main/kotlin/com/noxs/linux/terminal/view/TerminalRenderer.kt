@@ -158,7 +158,7 @@ class TerminalRenderer {
         val line = buf.screen()[buf.cursorRow.coerceAtMost(buf.rows - 1)]
         if (buf.cursorCol < line.chars.size) {
             textPaint.color = 0xffffffff.toInt()
-            canvas.drawText(String(line.chars[buf.cursorCol]), left, top + metrics.fontAscent, textPaint)
+            canvas.drawText(line.chars[buf.cursorCol].toString(), left, top + metrics.fontAscent, textPaint)
         }
     }
 

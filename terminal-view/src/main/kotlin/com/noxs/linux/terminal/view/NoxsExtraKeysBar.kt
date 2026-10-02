@@ -59,7 +59,7 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
             textSize = 13f
             typeface = Typeface.MONOSPACE
             setTextColor(0xffe6e6e6.toInt())
-            background = keyBackground()
+            background = keyBackground(false)
             setPadding(dp(10), 0, dp(10), 0)
             minWidth = dp(44)
             stateListAnimator = null

@@ -8,7 +8,6 @@ package com.noxs.linux.runtime
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
-import androidx.core.content.getSystemService
 import com.noxs.linux.shared.NoxsCapabilities
 import com.noxs.linux.shared.NoxsLog
 import com.noxs.linux.shared.Support
@@ -23,7 +22,7 @@ object NoxsDeviceCapabilities {
         val sockets = probeUnixSockets(paths)
         val namespaces = probeNamespaces()
         val root = probeRoot()
-        val pm = context.getSystemService<PowerManager>()
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val ignoring = pm != null && pm.isIgnoringBatteryOptimizations(context.packageName)
         return NoxsCapabilities(
             arch = arch,
