@@ -1,0 +1,68 @@
+#!/bin/sh
+# noxs-socket — unix socket manager for the Noxs userspace (original).
+# Sockets live under /run, /var/run (incl. /var/run/noxs) of the sandbox.
+# Usage:
+#   noxs-socket list [dir]         — list unix sockets (default /var/run + /run)
+#   noxs-socket test <path>        — check a socket file exists and is a socket
+#   noxs-socket serve <path> -- <cmd>  — create a socket backed by cmd (needs socat)
+#   noxs-socket rm <path>          — remove a stale socket file
+
+set -u
+
+list_sockets() {
+    dir="${1:-}"
+    if [ -z "$dir" ]; then
+        find /run /var/run -type s 2>/dev/null | head -50
+    else
+        find "$dir" -type s 2>/dev/null | head -50
+    fi
+}
+
+test_socket() {
+    path="$1"
+    case "$path" in
+        /run/*|/var/run/*|/tmp/*) ;;
+        *) echo "noxs-socket: path must be under /run, /var/run or /tmp" >&2; return 2 ;;
+    esac
+    if [ -S "$path" ]; then
+        echo "socket: $path (OK)"
+        ls -l "$path" 2>/dev/null | awk '{print $1, $3, $4, $NF}'
+        return 0
+    fi
+    echo "noxs-socket: not a socket: $path" >&2
+    return 1
+}
+
+serve_socket() {
+    path="$1"; shift
+    [ "$1" = "--" ] && shift
+    case "$path" in
+        /run/*|/var/run/*|/tmp/*) ;;
+        *) echo "noxs-socket: path must be under /run, /var/run or /tmp" >&2; exit 2 ;;
+    esac
+    if ! command -v socat >/dev/null 2>&1; then
+        echo "noxs-socket: socat is required (sudo apt install socat)" >&2
+        exit 3
+    fi
+    mkdir -p "$(dirname "$path")"
+    rm -f "$path"
+    exec socat UNIX-LISTEN:"$path",fork EXEC:"$*"
+}
+
+rm_socket() {
+    path="$1"
+    case "$path" in
+        /run/*|/var/run/*|/tmp/*) ;;
+        *) echo "noxs-socket: path must be under /run, /var/run or /tmp" >&2; exit 2 ;;
+    esac
+    rm -f "$path"
+    echo "removed: $path"
+}
+
+case "${1:-list}" in
+    list)  list_sockets "${2:-}" ;;
+    test)  test_socket "${2:-}" ;;
+    serve) shift; serve_socket "$@" ;;
+    rm)    rm_socket "${2:-}" ;;
+    *) echo "usage: noxs-socket list|test|serve|rm …" >&2; exit 2 ;;
+esac

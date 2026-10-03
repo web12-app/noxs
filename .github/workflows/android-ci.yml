@@ -1,0 +1,145 @@
+name: android-ci
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-build:
+    name: Android build + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK / NDK / CMake
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+
+      - name: Gradle setup (official action, wrapper-free capable)
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Provision wrapper if missing
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 8.7
+          fi
+
+      - name: Build + unit tests
+        run: ./gradlew assembleDebug assembleRelease testDebugUnitTest --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: noxs-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/reports/androidTests/
+
+  rootfs-validation:
+    name: Bootstrap + filesystem security validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Validate manifests, sync, shell tooling
+        run: |
+          chmod +x scripts/*.sh linux-runtime/**/*.sh 2>/dev/null || true
+          scripts/test.sh --manifests
+          scripts/test.sh --sync-check
+          scripts/test.sh --scripts
+
+      - name: Filesystem security tests (JVM)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Run security-focused unit tests
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
+          ./gradlew noxs-shared:test terminal-emulator:test
+
+  release:
+    name: Release (signed APK)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ android-build, rootfs-validation ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK + CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Decode signing keystore
+        env:
+          NOXS_KEYSTORE_B64: ${{ secrets.NOXS_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$NOXS_KEYSTORE_B64" ]; then
+            echo "$NOXS_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/noxs.keystore"
+            echo "NOXS_KEYSTORE_FILE=$RUNNER_TEMP/noxs.keystore" >> "$GITHUB_ENV"
+          else
+            echo "NOXS_KEYSTORE_FILE=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build signed release
+        env:
+          NOXS_KEYSTORE_PASSWORD: ${{ secrets.NOXS_KEYSTORE_PASSWORD }}
+          NOXS_KEY_ALIAS: ${{ secrets.NOXS_KEY_ALIAS }}
+          NOXS_KEY_PASSWORD: ${{ secrets.NOXS_KEY_PASSWORD }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true

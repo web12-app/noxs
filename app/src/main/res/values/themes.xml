@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Noxs" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/noxs_primary</item>
+        <item name="colorOnPrimary">@color/noxs_on_primary</item>
+        <item name="colorSecondary">@color/noxs_accent</item>
+        <item name="android:colorBackground">@color/noxs_background</item>
+        <item name="colorSurface">@color/noxs_surface</item>
+        <item name="colorOnSurface">@color/noxs_text</item>
+        <item name="colorError">@color/noxs_error</item>
+        <item name="android:statusBarColor">@color/noxs_background</item>
+        <item name="android:navigationBarColor">@color/noxs_background</item>
+        <item name="android:fontFamily">monospace</item>
+    </style>
+
+    <style name="Text.Noxs.Title" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:textColor">@color/noxs_text</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Text.Noxs.Body" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">@color/noxs_text_dim</item>
+    </style>
+
+    <style name="Text.Noxs.Mono" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textColor">@color/noxs_text</item>
+        <item name="android:fontFamily">monospace</item>
+    </style>
+</resources>

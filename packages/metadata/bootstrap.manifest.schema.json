@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Noxs bootstrap manifest",
+  "type": "object",
+  "required": ["schema", "arch", "rootfs"],
+  "properties": {
+    "schema": { "const": 1 },
+    "arch": { "enum": ["arm64-v8a", "armeabi-v7a", "x86_64"] },
+    "rootfs": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https://|^file://" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$|^$" },
+        "format": { "type": "string", "enum": ["tar.xz", "tar.gz", "tar"] },
+        "sizeBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "proot": {
+      "type": "object",
+      "required": ["url"],
+      "description": "Optional since v0.1.0: proot ships inside the APK as jniLibs (libproot.so) because Android 10+ denies exec from app data storage. Kept for future app-level upgrade channels.",
+      "properties": {
+        "url": { "type": "string", "pattern": "^https://|^file://" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$|^$" }
+      }
+    },
+    "generatedAt": { "type": "string" },
+    "source": { "type": "string" },
+    "note": { "type": "string" }
+  },
+  "additionalProperties": false
+}

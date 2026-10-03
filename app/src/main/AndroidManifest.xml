@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Noxs — original Debian-optimized Linux userspace for Android.
+  Declares only sandbox-respecting permissions. No storage-sweeping or
+  superuser permissions are requested.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".NoxsApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.Noxs"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".ui.WelcomeActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.SetupActivity"
+            android:exported="false"
+            android:label="@string/title_setup" />
+
+        <activity
+            android:name=".ui.TerminalActivity"
+            android:exported="false"
+            android:label="@string/title_terminal"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.FileBrowserActivity"
+            android:exported="false"
+            android:label="@string/title_file_browser" />
+
+        <activity
+            android:name=".ui.PackageManagerActivity"
+            android:exported="false"
+            android:label="@string/title_package_manager" />
+
+        <activity
+            android:name=".ui.UserManagerActivity"
+            android:exported="false"
+            android:label="@string/title_user_manager" />
+
+        <activity
+            android:name=".ui.ProcessManagerActivity"
+            android:exported="false"
+            android:label="@string/title_process_manager" />
+
+        <activity
+            android:name=".ui.ServiceManagerActivity"
+            android:exported="false"
+            android:label="@string/title_service_manager" />
+
+        <activity
+            android:name=".ui.EnvVarsActivity"
+            android:exported="false"
+            android:label="@string/title_env_vars" />
+
+        <activity
+            android:name=".ui.StorageActivity"
+            android:exported="false"
+            android:label="@string/title_storage" />
+
+        <activity
+            android:name=".ui.SecurityActivity"
+            android:exported="false"
+            android:label="@string/title_security" />
+
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:label="@string/title_settings" />
+
+        <activity
+            android:name=".ui.DiagnosticsActivity"
+            android:exported="false"
+            android:label="@string/title_diagnostics" />
+
+        <activity
+            android:name=".ui.AboutActivity"
+            android:exported="false"
+            android:label="@string/title_about" />
+
+        <service
+            android:name=".runtime.NoxsService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>

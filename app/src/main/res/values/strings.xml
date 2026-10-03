@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Noxs strings (original) -->
+<resources>
+    <string name="app_name">Noxs</string>
+    <string name="app_tagline">A Debian-optimized Linux environment for Android</string>
+
+    <!-- Welcome -->
+    <string name="welcome_setup">Set up Linux environment</string>
+    <string name="welcome_open_terminal">Open terminal</string>
+    <string name="welcome_disclaimer">Noxs runs a Debian 12 userspace entirely inside this app\'s sandbox. sudo controls the Noxs environment only — it never grants Android device root.</string>
+
+    <!-- Setup -->
+    <string name="title_setup">Linux environment setup</string>
+    <string name="setup_password_title">Set the noxs user password</string>
+    <string name="setup_password_hint">Used by sudo inside the Noxs sandbox</string>
+    <string name="setup_password2_hint">Repeat password</string>
+    <string name="setup_password_mismatch">Passwords do not match</string>
+    <string name="setup_start">Start setup</string>
+    <string name="setup_step_arch">Detecting architecture</string>
+    <string name="setup_step_storage">Initializing secure storage</string>
+    <string name="setup_step_manifest">Loading bootstrap manifest</string>
+    <string name="setup_step_proot">Acquiring proot runtime</string>
+    <string name="setup_step_rootfs">Acquiring Debian 12 root filesystem</string>
+    <string name="setup_step_extract">Extracting root filesystem (path-traversal protected)</string>
+    <string name="setup_step_configure">Configuring Debian userspace</string>
+    <string name="setup_step_user">Creating noxs user</string>
+    <string name="setup_step_run">Initializing /run and /var/run</string>
+    <string name="setup_step_apt">Initializing package manager</string>
+    <string name="setup_step_shell">Preparing first shell</string>
+    <string name="setup_done">Setup complete</string>
+    <string name="setup_done_msg">The Noxs Linux environment is ready.</string>
+    <string name="setup_open_terminal">Open terminal</string>
+    <string name="setup_sha_prefix">rootfs SHA-256:</string>
+    <string name="setup_sha_unpinned">Trust-on-first-use — pinned for future updates. Release builds pin checksums via scripts/build-rootfs.sh.</string>
+
+    <!-- Terminal -->
+    <string name="title_terminal">Terminal</string>
+    <string name="drawer_sessions">Sessions</string>
+    <string name="drawer_new_session">New session</string>
+    <string name="drawer_new_root_session">New root session (sandbox)</string>
+    <string name="drawer_close_session">Close current session</string>
+    <string name="nav_packages">Packages</string>
+    <string name="nav_files">Files</string>
+    <string name="nav_users">Users</string>
+    <string name="nav_processes">Processes</string>
+    <string name="nav_services">Services</string>
+    <string name="nav_env">Environment</string>
+    <string name="nav_storage">Storage</string>
+    <string name="nav_security">Security</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_diagnostics">Diagnostics</string>
+    <string name="nav_about">About Noxs</string>
+    <string name="status_cpu">CPU %1$s%%</string>
+    <string name="status_mem">MEM %1$s/%2$s MB</string>
+    <string name="status_storage">ROOTFS %1$s MB</string>
+    <string name="status_sandbox">sandbox</string>
+    <string name="copied">Copied</string>
+    <string name="no_sessions">No active sessions</string>
+
+    <!-- Generic -->
+    <string name="action_refresh">Refresh</string>
+    <string name="action_close">Close</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_rename">Rename</string>
+    <string name="action_search">Search</string>
+    <string name="action_install">Install</string>
+    <string name="action_create">Create</string>
+    <string name="action_apply">Apply</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="err_generic">Something went wrong. See Diagnostics for details.</string>
+    <string name="err_storage">Unable to initialize app storage.</string>
+    <string name="err_bootstrap">Unable to start Linux environment. Check your connection and retry.</string>
+    <string name="err_bootstrap_verify">Bootstrap verification failed. The download could not be verified.</string>
+    <string name="err_package_install">Package installation failed. See the terminal output.</string>
+    <string name="err_permission_denied">Permission denied.</string>
+    <string name="err_capability">Required capability is unavailable on this Android device.</string>
+    <string name="err_not_installed">The Linux environment is not set up yet.</string>
+    <string name="confirm_reset_title">Reset Linux environment?</string>
+    <string name="confirm_reset_msg">This deletes the entire Noxs root filesystem, including /home/noxs. You will need to run setup again.</string>
+
+    <!-- Package manager -->
+    <string name="title_package_manager">Packages</string>
+    <string name="pkg_search_hint">Search packages (apt-cache)</string>
+    <string name="pkg_installed">Installed</string>
+    <string name="pkg_update_lists">Run apt update</string>
+    <string name="pkg_install_hint">Install runs in a terminal session with sudo.</string>
+
+    <!-- Files -->
+    <string name="title_file_browser">Files</string>
+    <string name="files_root_label">Noxs rootfs</string>
+    <string name="files_empty">Empty directory</string>
+
+    <!-- Users -->
+    <string name="title_user_manager">Users</string>
+    <string name="users_new_name">New username</string>
+    <string name="users_create">Create user</string>
+    <string name="users_set_password">Set password</string>
+    <string name="users_noxs_protected">The noxs user cannot be deleted.</string>
+    <string name="users_home">Home</string>
+
+    <!-- Processes -->
+    <string name="title_process_manager">Processes</string>
+    <string name="proc_kill">Kill</string>
+    <string name="proc_kill_confirm">Kill process %1$d?</string>
+
+    <!-- Services -->
+    <string name="title_service_manager">Services</string>
+    <string name="svc_start">Start</string>
+    <string name="svc_stop">Stop</string>
+    <string name="svc_restart">Restart</string>
+    <string name="svc_none">No services defined in /etc/noxs/services/</string>
+    <string name="svc_code_title">code-server (VS Code in browser)</string>
+    <string name="svc_code_action">noxs code status</string>
+
+    <!-- Env -->
+    <string name="title_env_vars">Environment variables</string>
+    <string name="env_key_hint">KEY</string>
+    <string name="env_value_hint">value</string>
+    <string name="env_add">Set variable</string>
+    <string name="env_scope">/etc/environment — applies to new sessions</string>
+
+    <!-- Storage -->
+    <string name="title_storage">Storage</string>
+    <string name="storage_rootfs">Root filesystem</string>
+    <string name="storage_apt_cache">APT package cache</string>
+    <string name="storage_logs">App logs</string>
+    <string name="storage_clear_cache">Clear APT cache</string>
+    <string name="storage_reset">Reset Linux environment</string>
+    <string name="storage_warn_exceeded">Storage usage exceeds the configured warning threshold.</string>
+
+    <!-- Security -->
+    <string name="title_security">Security &amp; sandbox</string>
+    <string name="security_notice">Noxs runs inside the Android application sandbox. It does not modify the Android system, does not bypass SELinux, and sudo grants privileges only within the Noxs environment.</string>
+
+    <!-- Settings -->
+    <string name="title_settings">Settings</string>
+    <string name="settings_font_size">Font size</string>
+    <string name="settings_scrollback">Scrollback lines</string>
+    <string name="settings_extra_keys">Show extra keys row</string>
+    <string name="settings_volume_keys">Volume keys as arrows</string>
+    <string name="settings_bell">Audible bell</string>
+    <string name="settings_max_sessions">Session quota</string>
+    <string name="settings_max_procs">Process quota per session</string>
+    <string name="settings_storage_warn">Storage warning threshold (MB)</string>
+    <string name="settings_rootfs_url">Custom rootfs URL (https, optional)</string>
+    <string name="settings_dns">DNS servers (one per line)</string>
+    <string name="settings_saved">Settings saved</string>
+
+    <!-- Diagnostics -->
+    <string name="title_diagnostics">Diagnostics (developer)</string>
+    <string name="diag_copy">Copy logs</string>
+    <string name="diag_clear">Clear</string>
+
+    <!-- About -->
+    <string name="title_about">About Noxs</string>
+    <string name="about_body">Noxs is an original, Debian-optimized Linux userspace environment for Android. It was designed using public architectural concepts (terminal emulator + proot rootfs) and contains no code, branding, or assets from other projects.\n\ncode-server is optional and downloaded by the user under its own MIT license.\n\nNoxs is distributed under the Apache License 2.0.</string>
+    <string name="about_version">Version %1$s</string>
+
+    <!-- Notifications -->
+    <string name="notif_title">Noxs Linux environment</string>
+    <string name="notif_sessions">%1$d terminal session(s) running</string>
+    <string name="notif_idle">Linux environment running</string>
+    <string name="channel_runtime">Noxs runtime</string>
+
+    <!-- Session manager (drawer list) -->
+    <string name="session_close">Close</string>
+    <string name="session_root_badge">ROOT</string>
+</resources>

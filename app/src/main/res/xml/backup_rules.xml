@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Rootfs and secrets are never backed up (too large; credentials must not sync). -->
+    <exclude domain="file" path="noxs" />
+    <exclude domain="file" path="noxs/bin" />
+    <exclude domain="file" path="noxs/run" />
+</full-backup-content>

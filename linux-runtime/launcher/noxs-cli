@@ -1,0 +1,131 @@
+#!/bin/bash
+# noxs — Noxs CLI for the Debian userspace (original implementation)
+# Usage:
+#   noxs help
+#   noxs code install|start|stop|restart|status
+#   noxs-service start|stop|restart|status [service]
+#   noxs-socket list|test <path>
+#   noxs-ps
+#   noxs info
+
+set -u
+NOXS_RUN_DIR="/var/run/noxs"
+CODE_DIR="/opt/code-server"
+CODE_DATA="$HOME/.noxs/code"
+CODE_WORKSPACE="$HOME"
+CODE_ADDR="127.0.0.1:8080"      # local-only by default, never exposed
+CODE_PID="$NOXS_RUN_DIR/code-server.pid"
+
+msg()  { printf 'noxs: %s\n' "$*"; }
+err()  { printf 'noxs: %s\n' "$*" >&2; }
+
+# ---------------------------------------------------------------- noxs code
+
+code_installed() {
+    [ -x "$CODE_DIR/bin/code-server" ]
+}
+
+code_running() {
+    [ -f "$CODE_PID" ] && kill -0 "$(cat "$CODE_PID")" 2>/dev/null
+}
+
+code_install() {
+    if code_installed; then
+        msg "code-server already installed at $CODE_DIR"
+        return 0
+    fi
+    msg "code-server is not bundled with Noxs."
+    msg "Install it with the official MIT-licensed release, e.g.:"
+    msg "  curl -fsSL https://code-server.dev/install.sh | sh -s -- --prefix $CODE_DIR"
+    msg "Licensing: code-server is MIT (Fair Code by Coder). Review its license"
+    msg "before use: https://github.com/coder/code-server/blob/main/LICENSE"
+    msg "After install, run: noxs code start"
+    return 1
+}
+
+code_start() {
+    if ! code_installed; then
+        err "code-server not installed — run: noxs code install"
+        return 1
+    fi
+    if code_running; then
+        msg "code-server already running (pid $(cat "$CODE_PID"))"
+        return 0
+    fi
+    mkdir -p "$NOXS_RUN_DIR" "$CODE_DATA"
+    # resource quotas honored via /etc/noxs/resources.conf (see noxs-resource)
+    nohup "$CODE_DIR/bin/code-server" \
+        --bind-addr "$CODE_ADDR" \
+        --user-data-dir "$CODE_DATA" \
+        --extensions-dir "$CODE_DATA/extensions" \
+        --disable-telemetry \
+        --disable-update-check \
+        "$CODE_WORKSPACE" > /var/log/noxs/code-server.log 2>&1 &
+    echo $! > "$CODE_PID"
+    sleep 1
+    if code_running; then
+        msg "code-server started on http://$CODE_ADDR (local-only)"
+    else
+        err "code-server failed to start — see /var/log/noxs/code-server.log"
+        rm -f "$CODE_PID"
+        return 1
+    fi
+}
+
+code_stop() {
+    if code_running; then
+        kill "$(cat "$CODE_PID")" 2>/dev/null
+        sleep 1
+        kill -9 "$(cat "$CODE_PID")" 2>/dev/null || true
+        msg "code-server stopped"
+    else
+        msg "code-server not running"
+    fi
+    rm -f "$CODE_PID"
+}
+
+code_status() {
+    if code_running; then
+        echo "code-server: running (pid $(cat "$CODE_PID"), http://$CODE_ADDR, local-only)"
+        return 0
+    elif code_installed; then
+        echo "code-server: installed, stopped"
+        return 3
+    else
+        echo "code-server: not installed"
+        return 3
+    fi
+}
+
+# ---------------------------------------------------------------- noxs info
+
+do_info() {
+    echo "Noxs Debian userspace"
+    echo "  user:    $(id -un) (uid $(id -u))"
+    echo "  kernel:  $(uname -sr)"
+    echo "  run dir: $NOXS_RUN_DIR"
+    echo "  sudo:    sandbox-only privilege (manages Noxs, not Android)"
+    noxs-socket list 2>/dev/null | head -5 || true
+}
+
+case "${1:-help}" in
+    code)
+        case "${2:-status}" in
+            install) code_install ;;
+            start)   code_start ;;
+            stop)    code_stop ;;
+            restart) code_stop; code_start ;;
+            status)  code_status ;;
+            *) err "usage: noxs code install|start|stop|restart|status"; exit 2 ;;
+        esac
+        ;;
+    info) do_info ;;
+    help|--help|-h)
+        sed -n '2,10p' "$0"
+        ;;
+    *)
+        # Forward legacy aliases so 'noxs-service start ssh' works as 'noxs service'
+        err "unknown command: $1 (try: noxs help)"
+        exit 2
+        ;;
+esac

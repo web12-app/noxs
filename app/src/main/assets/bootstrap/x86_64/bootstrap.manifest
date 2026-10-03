@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "arch": "x86_64",
+  "rootfs": {
+    "url": "https://raw.githubusercontent.com/debuerreotype/docker-debian-artifacts/8f962b15d7884a90e17876a9303cbac909d119aa/bookworm/oci/blobs/rootfs.tar.gz",
+    "sha256": "eaac70c68abdf6ffacf6de10d31ed9de4813505d1a794eb7393cb27fceb624a6",
+    "format": "tar.gz",
+    "sizeBytes": 48503440
+  },
+  "generatedAt": "2026-10-03",
+  "source": "scripts/build-rootfs.sh"
+}
