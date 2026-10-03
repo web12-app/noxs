@@ -32,7 +32,10 @@ class TerminalView @JvmOverloads constructor(
         private set
 
     val renderer = TerminalRenderer()
-    private val metrics by lazy { renderer.measure() }
+
+    // Recomputed in updateSize(); NOT lazy — the first measurement would run
+    // before onAttachedToWindow applied the real density scale.
+    private var metrics = renderer.measure()
     private val scroller = Scroller(context)
     private var scrollRows = 0
     private var isFocusedVisual = false
@@ -175,7 +178,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun updateSize() {
-        val m = metrics
+        val m = renderer.measure().also { metrics = it }
         val w = width.takeIf { it > 0 } ?: 720
         val h = height.takeIf { it > 0 } ?: 1200
         val cols = (w / m.charWidth).toInt().coerceAtLeast(4)

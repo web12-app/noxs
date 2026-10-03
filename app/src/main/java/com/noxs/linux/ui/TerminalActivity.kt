@@ -103,10 +103,37 @@ class TerminalActivity : AppCompatActivity(), com.noxs.linux.terminal.emulator.T
             }
         }
 
-        if (RuntimeHolder.sessions?.sessions?.value.isNullOrEmpty()) {
-            newSession(root = false)
+        // Auto-create/attach is deferred to adoptRuntimeNow() when the service is
+        // still starting: calling newSession() here raced with NoxsService.start()
+        // (RuntimeHolder.sessions is set only in the service's onCreate, which runs
+        // AFTER this onCreate finishes), so sessionManager was still null, the
+        // attempt bailed out with a toast, and nothing ever re-triggered it —
+        // leaving a sessionless, permanently black terminal on cold launches.
+        val existing = RuntimeHolder.sessions?.sessions?.value
+        if (!existing.isNullOrEmpty()) {
+            current = existing.first()
+            attachCurrent()
         } else {
-            current = RuntimeHolder.sessions?.sessions?.value?.firstOrNull()
+            autoCreatePending = true
+            fulfillAutoCreateIfReady()
+        }
+    }
+
+    /** onCreate found no session; fulfilled as soon as the service runtime is
+     *  actually available (either right here if it already is, or in
+     *  adoptRuntimeNow() after NoxsService finishes starting). */
+    private var autoCreatePending = false
+
+    private fun fulfillAutoCreateIfReady() {
+        if (!autoCreatePending) return
+        val mgr = sessionManager ?: RuntimeHolder.sessions ?: return
+        sessionManager = mgr
+        autoCreatePending = false
+        val list = mgr.sessions.value
+        if (list.isEmpty()) {
+            newSession(root = false)
+        } else if (current == null) {
+            current = list.first()
             attachCurrent()
         }
     }
@@ -136,6 +163,8 @@ class TerminalActivity : AppCompatActivity(), com.noxs.linux.terminal.emulator.T
         lifecycleScope.launch {
             sessionManager?.sessions?.collect { list -> renderSessions(list) }
         }
+        // Fulfill the deferred auto-create now that the runtime is available.
+        fulfillAutoCreateIfReady()
     }
 
     private fun newSession(root: Boolean) {
