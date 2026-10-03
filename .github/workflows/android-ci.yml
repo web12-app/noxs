@@ -53,7 +53,7 @@ jobs:
           fi
 
       - name: Build + unit tests
-        run: ./gradlew assembleDebug assembleRelease testDebugUnitTest --stacktrace
+        run: ./gradlew assembleDebug assembleRelease testDebugUnitTest :terminal-emulator:test --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

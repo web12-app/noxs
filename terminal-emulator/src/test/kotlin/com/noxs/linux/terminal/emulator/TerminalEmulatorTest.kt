@@ -169,6 +169,43 @@ class TerminalEmulatorTest {
         assertEquals(4, emu.buffer.cols)
     }
 
+    @Test fun `resize across growing widths keeps line-width invariant`() {
+        // Regression: v0.1.1 crashed in onSizeChanged ->
+        // ArrayIndexOutOfBoundsException(src.length=80, dst.length=135, length=90)
+        // because resize() created newly added rows at the STALE width, so a
+        // later column resize copied past the end of a narrow line.
+        val buf = TerminalBuffer(80, 5, 100)
+        buf.reset()
+        buf.resize(90, 8)   // cols AND rows grow: previously added rows stayed 80 wide
+        buf.resize(135, 10) // previously crashed: arraycopy(80-wide src, 135 dst, len 90)
+        assertEquals(135, buf.cols)
+        assertEquals(10, buf.rows)
+        for (line in buf.mainLines + buf.altLines) {
+            assertEquals(135, line.chars.size)
+            assertEquals(135, line.styles.size)
+        }
+        buf.resize(40, 4) // shrink must stay consistent too
+        for (line in buf.mainLines + buf.altLines) {
+            assertEquals(40, line.chars.size)
+            assertEquals(40, line.styles.size)
+        }
+        assertEquals(40, buf.cols)
+        assertEquals(4, buf.rows)
+    }
+
+    @Test fun `resize rows only never breaks invariant`() {
+        val buf = TerminalBuffer(24, 4, 50)
+        buf.reset()
+        buf.resize(24, 12)
+        buf.resize(24, 3)
+        buf.resize(24, 9)
+        for (line in buf.mainLines + buf.altLines) {
+            assertEquals(24, line.chars.size)
+            assertEquals(24, line.styles.size)
+        }
+        assertEquals(9, buf.rows)
+    }
+
     @Test fun `tab advances to next stop`() {
         write("a\tb")
         val row = screen()[0]

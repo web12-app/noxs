@@ -142,25 +142,36 @@ class TerminalBuffer(initialCols: Int, initialRows: Int, var scrollbackMax: Int)
 
     /** Grows/shrinks the screen. No reflow (documented limitation). */
     fun resize(newCols: Int, newRows: Int) {
-        if (newCols == cols && newRows == rows) return
-        if (newCols != cols) {
+        val targetCols = newCols.coerceAtLeast(1)
+        val targetRows = newRows.coerceAtLeast(1)
+        if (targetCols == cols && targetRows == rows) return
+        if (targetCols != cols) {
             for (list in listOf(mainLines, altLines)) {
                 for (line in list) {
-                    val newChars = CharArray(newCols) { ' ' }
-                    System.arraycopy(line.chars, 0, newChars, 0, minOf(cols, newCols))
-                    line.chars = newChars
-                    val newStyles = LongArray(newCols) { TextStyle.defaultStyle() }
-                    System.arraycopy(line.styles, 0, newStyles, 0, minOf(cols, newCols))
-                    line.styles = newStyles
+                    // Bound each copy by the line's ACTUAL array lengths, never
+                    // the nominal cols: mixed widths must never crash here.
+                    if (line.chars.size != targetCols) {
+                        val newChars = CharArray(targetCols) { ' ' }
+                        System.arraycopy(line.chars, 0, newChars, 0, minOf(line.chars.size, targetCols))
+                        line.chars = newChars
+                    }
+                    if (line.styles.size != targetCols) {
+                        val newStyles = LongArray(targetCols) { TextStyle.defaultStyle() }
+                        System.arraycopy(line.styles, 0, newStyles, 0, minOf(line.styles.size, targetCols))
+                        line.styles = newStyles
+                    }
                 }
             }
+            // Update cols BEFORE growing rows so newly added lines are created
+            // at the NEW width (previously they used the stale width, breaking
+            // the "every line is cols wide" invariant on the next resize).
+            cols = targetCols
         }
         for (list in listOf(mainLines, altLines)) {
-            while (list.size < newRows) list.add(Line(cols))
-            while (list.size > newRows) list.removeAt(list.size - 1)
+            while (list.size < targetRows) list.add(Line(cols))
+            while (list.size > targetRows) list.removeAt(list.size - 1)
         }
-        cols = newCols
-        rows = newRows
+        rows = targetRows
         cursorCol = cursorCol.coerceIn(0, cols - 1)
         cursorRow = cursorRow.coerceIn(0, rows - 1)
         topMargin = 0
