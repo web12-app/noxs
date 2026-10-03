@@ -24,7 +24,7 @@ class PasswdDbTest {
 
     private val shadow = """
         root:!:19700:0:99999:7:::
-        noxs:${'$'}y${'$'}j9${'$'}salt$hash:19700:0:99999:7:::
+        noxs:${'$'}y${'$'}j9${'$'}salt${'$'}hash:19700:0:99999:7:::
     """.trimIndent()
 
     @Test fun `parses passwd lines`() {

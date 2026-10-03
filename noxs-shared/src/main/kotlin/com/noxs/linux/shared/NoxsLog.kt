@@ -20,6 +20,10 @@ object NoxsLog {
     fun d(tag: String, message: String) = add("D", tag, message)
     fun i(tag: String, message: String) = add("I", tag, message)
     fun w(tag: String, message: String) = add("W", tag, message)
+    fun w(tag: String, message: String, error: Throwable?) {
+        // Same no-stacktrace policy as e(): type + message only.
+        add("W", tag, if (error != null) "$message (${error.javaClass.simpleName}: ${error.message})" else message)
+    }
     fun e(tag: String, message: String, error: Throwable? = null) {
         // Never store stack traces: log type + message only (privacy by default).
         add("E", tag, if (error != null) "$message (${error.javaClass.simpleName}: ${error.message})" else message)

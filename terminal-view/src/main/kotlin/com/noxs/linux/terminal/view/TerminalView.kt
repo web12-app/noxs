@@ -19,7 +19,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.Scroller
-import androidx.core.content.getSystemService
 import com.noxs.linux.terminal.emulator.KeyHandler
 import com.noxs.linux.terminal.emulator.TerminalEmulator
 import com.noxs.linux.terminal.emulator.TerminalSession
@@ -45,8 +44,8 @@ class TerminalView @JvmOverloads constructor(
     var onScreenUpdated: (() -> Unit)? = null
     var onSessionResized: ((rows: Int, cols: Int) -> Unit)? = null
 
-    private val clipboard by lazy { getSystemService<ClipboardManager>()!! }
-    private val imm by lazy { getSystemService<InputMethodManager>()!! }
+    private val clipboard by lazy { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    private val imm by lazy { context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager }
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean {

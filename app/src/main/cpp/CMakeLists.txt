@@ -8,6 +8,8 @@ target_link_libraries(noxs-pty
         android
         log)
 
-# Stricter build for a security-sensitive component.
+# Stricter build for a security-sensitive component. JNI callbacks receive
+# env/clazz parameters they legitimately never use, so disable that one check.
 target_compile_options(noxs-pty PRIVATE
-        -Wall -Wextra -Werror -fvisibility=hidden -fstack-protector-strong)
+        -Wall -Wextra -Werror -Wno-unused-parameter
+        -fvisibility=hidden -fstack-protector-strong)

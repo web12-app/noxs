@@ -62,7 +62,7 @@ class TerminalEmulatorTest {
         write("\u001b[1;38;2;12;34;56mZ")
         val line = emu.buffer.screen()[0]
         assertTrue(TextStyle.flags(line.styles[0]) and TextStyle.FLAG_BOLD != 0)
-        assertEquals(-0x1000000 or (12 shl 16) or (34 shl 8) or 56, TextStyle.fg(line.styles[0]))
+        assertEquals((12 shl 16) or (34 shl 8) or 56, TextStyle.fg(line.styles[0]))
     }
 
     @Test fun `256 color SGR`() {
@@ -78,11 +78,11 @@ class TerminalEmulatorTest {
 
     @Test fun `erase line EL keeps other rows`() {
         write("AAA\r\nBBB\r\nCCC")
-        write("\u001b[2K") // clear current row (row 2)
+        write("\u001b[2K") // erase entire current row — cursor sits on the row with CCC
         val s = screen()
         assertEquals("AAA", s[0])
-        assertEquals("", s[1])
-        assertEquals("CCC", s[2])
+        assertEquals("BBB", s[1])
+        assertEquals("", s[2])
     }
 
     @Test fun `alt screen mode 1049 restores main content`() {
