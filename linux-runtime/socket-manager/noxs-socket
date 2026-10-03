@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # noxs-socket — unix socket manager for the Noxs userspace (original).
 # Sockets live under /run, /var/run (incl. /var/run/noxs) of the sandbox.
 # Usage:

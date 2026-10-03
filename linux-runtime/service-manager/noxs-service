@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # noxs-service — lightweight service manager for the Noxs userspace (original).
 # Definitions: /etc/noxs/services/<name>.conf
 #   COMMAND=…    (required) full command line

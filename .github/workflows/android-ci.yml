@@ -24,13 +24,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK / NDK / CMake
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK + CMake
+      # NOTE: android-actions/setup-android@v3 is intentionally NOT used — it
+      # runs `sdkmanager tools`, a package Google removed from the SDK
+      # repository (action now fails). The GitHub runner image already ships
+      # the Android SDK ($ANDROID_HOME); we only accept licenses and add the
+      # NDK/CMake versions AGP 8.5.2 needs.
+      - name: SDK licenses + NDK + CMake
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
 
       - name: Gradle setup (official action, wrapper-free capable)
         uses: gradle/actions/setup-gradle@v3
@@ -108,11 +110,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-      - name: Install NDK + CMake
+      # Runner image ships the SDK; setup-android@v3 is broken upstream
+      # (see android-build job note).
+      - name: SDK licenses + NDK + CMake
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
 
       - uses: gradle/actions/setup-gradle@v3
         with:

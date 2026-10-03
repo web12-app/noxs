@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295
 # scripts/build-rootfs.sh — pin the Noxs Debian 12 rootfs (original).
 #
 # Produces:
