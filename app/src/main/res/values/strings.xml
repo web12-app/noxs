@@ -56,6 +56,7 @@
     <string name="status_sandbox">sandbox</string>
     <string name="copied">Copied</string>
     <string name="no_sessions">No active sessions</string>
+    <string name="session_finished_toast">%1$s exited (code %2$d). Open the drawer for a new session.</string>
 
     <!-- Generic -->
     <string name="action_refresh">Refresh</string>

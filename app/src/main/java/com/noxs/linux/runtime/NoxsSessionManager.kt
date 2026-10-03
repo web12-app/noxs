@@ -83,24 +83,30 @@ class NoxsSessionManager(
     }
 
     // ---- TerminalSessionClient forwarding (session -> UI + service) ----
+    // Everything is re-posted to the main loop. The emulator callbacks already
+    // arrive dispatched, but onSessionFinished is invoked DIRECTLY from the
+    // session's waiter thread — touching views there throws
+    // CalledFromWrongThreadException, which silently killed the waiter before
+    // the UI ever learned that the session had exited (stale "shell-1" label
+    // over a dead, empty terminal).
 
     override fun onTextChanged(session: TerminalSession) {
-        client?.onTextChanged(session)
+        MainLoop.post { client?.onTextChanged(session) }
     }
 
     override fun onTitleChanged(session: TerminalSession) {
-        client?.onTitleChanged(session)
+        MainLoop.post { client?.onTitleChanged(session) }
     }
 
     override fun onBell(session: TerminalSession) {
-        client?.onBell(session)
+        MainLoop.post { client?.onBell(session) }
     }
 
     override fun onSessionFinished(session: TerminalSession) {
         val entry = _sessions.value.firstOrNull { it.session === session }
         if (entry != null) _sessions.value = _sessions.value - entry
-        client?.onSessionFinished(session)
         NoxsLog.i("Sessions", "session '${session.label}' exited code=${session.exitCode}")
         updateNotification()
+        MainLoop.post { client?.onSessionFinished(session) }
     }
 }

@@ -106,10 +106,17 @@ Java_com_noxs_linux_terminal_emulator_NativePty_create(
 
     if (pid == 0) {
         // ---- child ----
-        close(master);
+        // Resolve the slave path BEFORE closing the master: ptsname()/ptsname_r()
+        // require a VALID master fd. The previous order (close, then ptsname)
+        // failed with EBADF -> open(NULL) failed -> EVERY child exited 127
+        // before exec'ing anything: black terminal, zero output, session dead.
+        char slave_path[128];
+        if (ptsname_r(master, slave_path, sizeof(slave_path)) != 0) _exit(127);
         setsid();
-        int slave = open(ptsname(master), O_RDWR);
+        int slave = open(slave_path, O_RDWR | O_NOCTTY);
         if (slave < 0) _exit(127);
+        close(master);
+        // Session leader without a controlling terminal: acquire it explicitly.
         ioctl(slave, TIOCSCTTY, NULL);
 
         struct winsize ws;

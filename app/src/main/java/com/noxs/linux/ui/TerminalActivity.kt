@@ -240,6 +240,13 @@ class TerminalActivity : AppCompatActivity(), com.noxs.linux.terminal.emulator.T
             current = null
             binding.statusSession.text = getString(R.string.no_sessions)
         }
+        // Make silent child deaths diagnosable: the user sees WHY the terminal
+        // is empty (e.g. code 127 = exec failed) instead of a black screen.
+        Toast.makeText(
+            this,
+            getString(R.string.session_finished_toast, session.label, session.exitCode),
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     @Deprecated("Deprecated in Java")
