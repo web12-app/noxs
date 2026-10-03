@@ -176,8 +176,8 @@ class NoxsInstaller(
         artifact: com.noxs.linux.shared.BootstrapArtifact,
         dest: File,
         progress: Progress,
-        doVerify: (File, String) -> Verify,
-        attempts: Int = 3
+        attempts: Int = 3,
+        doVerify: (File, String) -> Verify
     ) = withContext(Dispatchers.IO) {
         if (artifact.url.startsWith("file://")) {
             val src = File(artifact.url.removePrefix("file://"))
@@ -290,7 +290,7 @@ class NoxsInstaller(
             val proc = pb.start()
             proc.outputStream.use {
                 it.write("${NoxsConstants.DEFAULT_USER}:".toByteArray())
-                it.write(password)
+                it.write(String(password).toByteArray())
                 it.write('\n'.code)
                 it.flush()
             }
