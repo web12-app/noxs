@@ -37,7 +37,10 @@ class TerminalActivity : AppCompatActivity(), com.noxs.linux.terminal.emulator.T
     private var sessionManager: NoxsSessionManager? = null
 
     private var current: NoxsSessionManager.Entry? = null
-    private lateinit var sessionAdapter: TwoLineAdapter
+
+    // Nullable (not lateinit): adoptRuntimeNow() collects the sessions StateFlow,
+    // which can emit synchronously during onCreate before/around adapter binding.
+    private var sessionAdapter: TwoLineAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,10 +56,13 @@ class TerminalActivity : AppCompatActivity(), com.noxs.linux.terminal.emulator.T
             return
         }
 
+        // Bind the session list adapter BEFORE adopting the runtime: the sessions
+        // StateFlow emits its current value synchronously on Main.immediate, so
+        // renderSessions() may run inside adoptRuntime() during onCreate.
+        sessionAdapter = TwoLineAdapter.bind(binding.sessionList, emptyList())
+
         NoxsService.start(this)
         adoptRuntime()
-
-        sessionAdapter = TwoLineAdapter.bind(binding.sessionList, emptyList())
 
         // Drawer: sessions
         binding.btnNewSession.setOnClickListener { newSession(root = false) }
@@ -157,7 +163,8 @@ class TerminalActivity : AppCompatActivity(), com.noxs.linux.terminal.emulator.T
     }
 
     private fun renderSessions(list: List<NoxsSessionManager.Entry>) {
-        sessionAdapter.submit(list.map { entry ->
+        val adapter = sessionAdapter ?: return
+        adapter.submit(list.map { entry ->
             TwoLineRow(
                 title = entry.label + (if (entry.loginAsRoot) " [ROOT]" else ""),
                 subtitle = if (entry.session.isRunning) "running" else "exited (${entry.session.exitCode})",
