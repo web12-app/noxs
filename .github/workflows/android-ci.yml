@@ -24,15 +24,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # NOTE: android-actions/setup-android@v3 is intentionally NOT used — it
-      # runs `sdkmanager tools`, a package Google removed from the SDK
-      # repository (action now fails). The GitHub runner image already ships
-      # the Android SDK ($ANDROID_HOME); we only accept licenses and add the
-      # NDK/CMake versions AGP 8.5.2 needs.
-      - name: SDK licenses + NDK + CMake
+      # NOTE: newer ubuntu-24.04 runner images ship NO Android SDK, and
+      # android-actions/setup-android@v3 is broken upstream (it runs
+      # `sdkmanager tools`, a package Google removed). So we install the SDK
+      # deterministically from Google's official cmdline-tools zip.
+      - name: Android SDK (cmdline-tools + NDK + CMake)
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -fsSL -o /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/clt.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --sdk_root="$SDK" --licenses > /dev/null || true
+          "$SDKM" --sdk_root="$SDK" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
       - name: Gradle setup (official action, wrapper-free capable)
         uses: gradle/actions/setup-gradle@v3
@@ -110,12 +117,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Runner image ships the SDK; setup-android@v3 is broken upstream
-      # (see android-build job note).
-      - name: SDK licenses + NDK + CMake
+      # Runner images ship no Android SDK anymore — install it (see android-build note)
+      - name: Android SDK (cmdline-tools + NDK + CMake)
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -fsSL -o /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/clt.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --sdk_root="$SDK" --licenses > /dev/null || true
+          "$SDKM" --sdk_root="$SDK" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
       - uses: gradle/actions/setup-gradle@v3
         with:
