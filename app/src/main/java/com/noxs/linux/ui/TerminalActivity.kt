@@ -311,7 +311,7 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
 
     private fun clearTerminal() {
         val session = current?.session ?: return
-        session.emulator.buffer.reset()
+        session.emulator.clearScreen()
         session.write("clear\n".toByteArray(Charsets.UTF_8))
         binding.terminal.invalidate()
         updateTerminalTextView(session)

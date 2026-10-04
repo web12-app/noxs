@@ -6,6 +6,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
 
 class TerminalEmulatorTest {
 
@@ -204,6 +206,60 @@ class TerminalEmulatorTest {
             assertEquals(24, line.styles.size)
         }
         assertEquals(9, buf.rows)
+    }
+
+    @Test fun `concurrent output resize and snapshots keep screen rows valid`() {
+        val start = CountDownLatch(1)
+        val failures = Collections.synchronizedList(mutableListOf<Throwable>())
+        val workers = listOf(
+            Thread {
+                try {
+                    start.await()
+                    repeat(500) { write("line$it\r\n") }
+                } catch (t: Throwable) {
+                    failures.add(t)
+                }
+            },
+            Thread {
+                try {
+                    start.await()
+                    repeat(500) { emu.resize(12 + it % 24, 2 + it % 20) }
+                } catch (t: Throwable) {
+                    failures.add(t)
+                }
+            },
+            Thread {
+                try {
+                    start.await()
+                    repeat(500) {
+                        emu.screenText()
+                        emu.transcriptText()
+                    }
+                } catch (t: Throwable) {
+                    failures.add(t)
+                }
+            }
+        )
+
+        workers.forEach(Thread::start)
+        start.countDown()
+        workers.forEach { it.join(10_000) }
+
+        assertTrue("worker thread did not finish", workers.none { it.isAlive })
+        assertTrue("concurrent terminal operation failed: ${failures.joinToString()}", failures.isEmpty())
+        synchronized(emu) {
+            assertEquals(emu.buffer.rows, emu.buffer.screen().size)
+            (emu.buffer.mainLines + emu.buffer.altLines).forEach { line ->
+                assertEquals(emu.buffer.cols, line.chars.size)
+                assertEquals(emu.buffer.cols, line.styles.size)
+            }
+        }
+    }
+
+    @Test fun `clearScreen resets buffer`() {
+        write("visible output")
+        emu.clearScreen()
+        assertTrue(screen().all { it.isBlank() })
     }
 
     @Test fun `tab advances to next stop`() {

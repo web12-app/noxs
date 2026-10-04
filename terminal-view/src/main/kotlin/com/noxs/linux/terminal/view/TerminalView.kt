@@ -166,8 +166,13 @@ class TerminalView @JvmOverloads constructor(
             canvas.drawText("● Noxs Linux — initializing Debian 12 shell...", pad, pad * 2f, placeholderPaint)
             return
         }
-        renderer.render(canvas, emu, metrics, scrollRows, isFocusedVisual, resources.displayMetrics.density)
-        if (scrollRows == 0) renderer.drawCursor(canvas, emu, metrics)
+        // PTY output is parsed on a reader thread while Canvas rendering runs on
+        // the main thread. Use the emulator monitor so both frame traversal and
+        // cursor drawing see one consistent screen after writes/resizes.
+        synchronized(emu) {
+            renderer.render(canvas, emu, metrics, scrollRows, isFocusedVisual, resources.displayMetrics.density)
+            if (scrollRows == 0) renderer.drawCursor(canvas, emu, metrics)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

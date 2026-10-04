@@ -81,6 +81,7 @@ class TerminalEmulator(
         tabStops = BooleanArray(buffer.cols) { it % 8 == 0 }
     }
 
+    @Synchronized
     fun resize(newCols: Int, newRows: Int) {
         if (newCols <= 0 || newRows <= 0) return
         buffer.resize(newCols, newRows)
@@ -90,8 +91,16 @@ class TerminalEmulator(
         client.onScreenChanged()
     }
 
+    /** Clear the terminal buffer while holding the same lock used by rendering and output. */
+    @Synchronized
+    fun clearScreen() {
+        buffer.reset()
+        pendingWide = false
+    }
+
     // ------------------------------------------------------------------ input
 
+    @Synchronized
     fun write(data: ByteArray, length: Int = data.size) {
         var i = 0
         while (i < length) {
@@ -571,6 +580,7 @@ class TerminalEmulator(
     }
 
     /** Snapshot used by renderer & selection. */
+    @Synchronized
     fun screenText(): List<String> {
         val out = ArrayList<String>(buffer.rows)
         var join = false
@@ -585,6 +595,7 @@ class TerminalEmulator(
     }
 
     /** Full transcript (scrollback + non-empty screen lines up to cursor) for Terminal TextView / copy. */
+    @Synchronized
     fun transcriptText(): String {
         val sb = StringBuilder()
         for (i in buffer.scrollbackSize - 1 downTo 0) {
