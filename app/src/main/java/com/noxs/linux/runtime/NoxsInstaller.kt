@@ -103,6 +103,13 @@ class NoxsInstaller(
 
             // 6 — safe extraction
             progress.onStep(6, R.string.setup_step_extract, "")
+            // Remove any stale 0-byte top-level placeholders before extracting
+            listOf("bin", "sbin", "lib", "lib64").forEach { name ->
+                val f = File(paths.rootfs, name)
+                if (!java.nio.file.Files.isSymbolicLink(f.toPath()) && f.isFile && f.length() == 0L) {
+                    f.delete()
+                }
+            }
             val stats = RootfsExtractor(paths.rootfs).extract(rootfsArchive)
             progress.onLog("extracted files=${stats.files} dirs=${stats.dirs} links=${stats.links}")
 
@@ -286,6 +293,7 @@ class NoxsInstaller(
         if (password != null && password.isNotEmpty()) {
             val argv = launcher.oneShotArgv(listOf("/usr/sbin/chpasswd"), asRoot = true)
             val pb = ProcessBuilder(argv)
+            launcher.applyEnvTo(pb, mapOf("NOXS_ROOT_LOGIN" to "1"))
             pb.redirectErrorStream(true)
             val proc = pb.start()
             proc.outputStream.use {

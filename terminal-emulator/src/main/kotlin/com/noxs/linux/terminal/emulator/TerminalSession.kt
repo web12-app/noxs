@@ -75,6 +75,9 @@ class TerminalSession(
     @Volatile
     var isPty: Boolean = false
         private set
+    @Volatile
+    var receivedBytes: Long = 0L
+        private set
 
     private var masterFd: Int = -1
     private var stdinStream: OutputStream? = null
@@ -95,7 +98,7 @@ class TerminalSession(
         isPty = usePty
         if (usePty) {
             val res = NativePty.create(cmd, env, cwd, rows, cols)
-            if (res != null && res.size >= 2) {
+            if (res != null && res.size >= 2 && res[0] > 0 && res[1] >= 0) {
                 pid = res[0]
                 masterFd = res[1]
                 isRunning = true
@@ -115,6 +118,7 @@ class TerminalSession(
         try {
             val dir = File(cwd).takeIf { it.isDirectory } ?: File(cwd).parentFile?.takeIf { it.isDirectory } ?: File("/")
             val pb = ProcessBuilder(*cmd).directory(dir)
+            pb.redirectErrorStream(true)
             val newEnv = pb.environment()
             for (kv in env) {
                 val idx = kv.indexOf('=')
@@ -129,6 +133,8 @@ class TerminalSession(
             startWaiter()
         } catch (e: Exception) {
             NoxsLog.e("TerminalSession", "pipe start failed", e)
+            val errMsg = "\r\n\u001b[1;31m[Noxs] Failed to start session: ${e.message}\u001b[0m\r\n"
+            emulator.write(errMsg.toByteArray(Charsets.UTF_8))
             isRunning = false
             exitCode = 127
             client.onSessionFinished(this)
@@ -139,10 +145,13 @@ class TerminalSession(
         Thread({
             val buf = ByteArray(16 * 1024)
             try {
-                while (isRunning) {
+                while (true) {
                     val n = stream.read(buf)
                     if (n < 0) break
-                    if (n > 0) emulator.write(buf, n)
+                    if (n > 0) {
+                        receivedBytes += n
+                        emulator.write(buf, n)
+                    }
                 }
             } catch (e: Exception) {
                 if (isRunning) NoxsLog.w("TerminalSession", "reader ended: ${e.javaClass.simpleName}")
@@ -157,6 +166,8 @@ class TerminalSession(
             } else {
                 try { process?.waitFor() ?: -1 } catch (e: InterruptedException) { -1 }
             }
+            // Brief grace period for reader thread to drain final buffered bytes from PTY
+            try { Thread.sleep(40) } catch (_: InterruptedException) {}
             exitCode = code
             isRunning = false
             cleanup()
@@ -217,7 +228,7 @@ class TerminalSession(
 
     // ---- emulator client (dispatched to session client by the app layer) ----
 
-    private var pendingChange = false
+    private val pendingChange = AtomicBoolean(false)
 
     /** Pluggable main-loop dispatcher — set by the Android layer; defaults to inline. */
     var mainThreadDispatcher: ((Runnable) -> Unit)? = null
@@ -229,10 +240,9 @@ class TerminalSession(
 
     override fun onScreenChanged() {
         // Coalesce bursts of updates into one UI notification.
-        if (pendingChange) return
-        pendingChange = true
+        if (!pendingChange.compareAndSet(false, true)) return
         dispatch {
-            pendingChange = false
+            pendingChange.set(false)
             client.onTextChanged(this@TerminalSession)
         }
     }

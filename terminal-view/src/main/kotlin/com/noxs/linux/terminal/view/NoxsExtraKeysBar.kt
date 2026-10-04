@@ -1,7 +1,7 @@
 /*
  * Noxs terminal-view — original implementation.
- * Extra-keys bar: ESC / CTRL / ALT / TAB / FN / arrows, with CTRL+ALT latches
- * that apply to the next key press.
+ * Extra-keys bar: ESC / CTRL / ALT / TAB / arrows / shortcuts, with CTRL+ALT
+ * latches that apply to the next key press.
  */
 package com.noxs.linux.terminal.view
 
@@ -24,23 +24,26 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
     private val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(8), dp(4), dp(8), dp(4))
     }
 
     private val latchButtons = mutableMapOf<String, Button>()
     var terminalView: TerminalView? = null
 
     init {
+        isHorizontalScrollBarEnabled = false
         addView(row, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
-        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(44))
         setBackgroundColor(0xff1a1f27.toInt())
         addKey("ESC") { terminalView?.sendBytes(byteArrayOf(0x1b)) }
+        addKey("TAB") { terminalView?.sendBytes(byteArrayOf(0x09)) }
         addLatch("CTRL")
         addLatch("ALT")
-        addKey("TAB") { terminalView?.sendBytes(byteArrayOf(0x09)) }
         addKey("▲") { sendArrow('A', KeyEvent.KEYCODE_DPAD_UP) }
         addKey("▼") { sendArrow('B', KeyEvent.KEYCODE_DPAD_DOWN) }
         addKey("◀") { sendArrow('D', KeyEvent.KEYCODE_DPAD_LEFT) }
         addKey("▶") { sendArrow('C', KeyEvent.KEYCODE_DPAD_RIGHT) }
+        addKey("^C") { terminalView?.session?.write(byteArrayOf(0x03)) }
+        addKey("^L") { terminalView?.session?.write(byteArrayOf(0x0c)) }
         addKey("-") { terminalView?.sendBytes("-".toByteArray()) }
         addKey("/") { terminalView?.sendBytes("/".toByteArray()) }
         addKey("|") { terminalView?.sendBytes("|".toByteArray()) }
@@ -56,28 +59,36 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
     private fun addKey(label: String, action: () -> Unit) {
         row.addView(Button(context).apply {
             text = label
-            textSize = 13f
+            textSize = 12f
             typeface = Typeface.MONOSPACE
+            isAllCaps = false
             setTextColor(0xffe6e6e6.toInt())
             background = keyBackground(false)
+            minWidth = 0
+            minimumWidth = 0
+            minHeight = 0
+            minimumHeight = 0
             setPadding(dp(10), 0, dp(10), 0)
-            minWidth = dp(44)
             stateListAnimator = null
             setOnClickListener { action() }
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)).apply {
-            marginEnd = dp(6)
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)).apply {
+            marginEnd = dp(5)
         })
     }
 
     private fun addLatch(label: String) {
         val btn = Button(context).apply {
             text = label
-            textSize = 13f
+            textSize = 12f
             typeface = Typeface.MONOSPACE
+            isAllCaps = false
             setTextColor(0xffe6e6e6.toInt())
             background = keyBackground(latched = false)
+            minWidth = 0
+            minimumWidth = 0
+            minHeight = 0
+            minimumHeight = 0
             setPadding(dp(10), 0, dp(10), 0)
-            minWidth = dp(44)
             stateListAnimator = null
             setOnClickListener {
                 when (label) {
@@ -88,8 +99,8 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
             }
         }
         latchButtons[label] = btn
-        row.addView(btn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)).apply {
-            marginEnd = dp(6)
+        row.addView(btn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)).apply {
+            marginEnd = dp(5)
         })
     }
 
@@ -102,7 +113,7 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
     }
 
     private fun keyBackground(latched: Boolean): GradientDrawable = GradientDrawable().apply {
-        cornerRadius = dp(8).toFloat()
+        cornerRadius = dp(6).toFloat()
         setColor(if (latched) 0xff3ddc84.toInt() else 0xff232a35.toInt())
         setStroke(dp(1), 0xff2f3946.toInt())
     }

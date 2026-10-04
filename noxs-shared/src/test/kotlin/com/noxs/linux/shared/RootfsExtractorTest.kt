@@ -155,7 +155,23 @@ class RootfsExtractorTest {
         )
         val root = tmp.newFolder("rootfs")
         RootfsExtractor(root).extract(writeGzip(tar))
-        assertEquals(1, RootfsLinkQueue.size()) // deferred for in-sandbox creation
+        assertEquals(1, RootfsLinkQueue.size())
+        assertTrue(java.nio.file.Files.isSymbolicLink(File(root, "bin/true").toPath()))
+    }
+
+    @Test fun `accepts chained symlinks inside rootfs`() {
+        val tar = tarEntries(
+            dirEntry("usr/bin"),
+            dirEntry("etc/alternatives"),
+            fileEntry("usr/bin/mawk", "ELF"),
+            linkEntry("etc/alternatives/awk", "/usr/bin/mawk"),
+            linkEntry("usr/bin/awk", "/etc/alternatives/awk")
+        )
+        val root = tmp.newFolder("rootfs")
+        RootfsExtractor(root).extract(writeGzip(tar))
+        assertEquals(2, RootfsLinkQueue.size())
+        assertTrue(java.nio.file.Files.isSymbolicLink(File(root, "etc/alternatives/awk").toPath()))
+        assertTrue(java.nio.file.Files.isSymbolicLink(File(root, "usr/bin/awk").toPath()))
     }
 
     @Test fun `safeResolve rejects NUL and drive letters`() {

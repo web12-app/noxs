@@ -241,4 +241,11 @@ class TerminalEmulatorTest {
         assertEquals(TextStyle.FLAG_BOLD or TextStyle.FLAG_UNDERLINE, TextStyle.flags(s))
         assertEquals(1, TextStyle.charset(s))
     }
+
+    @Test fun `transcriptText returns scrollback and active screen`() {
+        write("noxs@android:~$ ls\r\nbin  etc  home  usr\r\nnoxs@android:~$ ")
+        val text = emu.transcriptText()
+        assertTrue(text.contains("noxs@android:~$ ls"))
+        assertTrue(text.contains("bin  etc  home  usr"))
+    }
 }

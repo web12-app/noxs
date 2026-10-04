@@ -37,6 +37,10 @@ class NoxsPaths(baseDir: File, val nativeLibDir: File? = null) {
      */
     val prootBinary: File
         get() = nativeLibDir?.let { File(it, "libproot.so") } ?: File(bin, "proot")
+    val prootLoaderBinary: File
+        get() = nativeLibDir?.let { File(it, "libproot-loader.so") } ?: File(bin, "proot-loader")
+    val prootLoader32Binary: File
+        get() = nativeLibDir?.let { File(it, "libproot-loader32.so") } ?: File(bin, "proot-loader32")
     val installMarker: File = File(base, NoxsConstants.INSTALL_COMPLETE_MARKER)
 
     // Rootfs-internal virtual paths (physical files under rootfs/)

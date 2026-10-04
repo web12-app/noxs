@@ -23,6 +23,7 @@ class OneShotExecutor(private val launcher: ProotLauncher) {
             val argv = launcher.oneShotArgv(cmd, asRoot = asRoot)
             try {
                 val pb = ProcessBuilder(argv).redirectErrorStream(false)
+                launcher.applyEnvTo(pb, if (asRoot) mapOf("NOXS_ROOT_LOGIN" to "1") else emptyMap())
                 val p = pb.start()
                 val out = p.inputStream.bufferedReader().use { it.readText() }
                 val err = p.errorStream.bufferedReader().use { it.readText() }

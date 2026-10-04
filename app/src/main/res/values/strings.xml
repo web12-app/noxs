@@ -56,7 +56,17 @@
     <string name="status_sandbox">sandbox</string>
     <string name="copied">Copied</string>
     <string name="no_sessions">No active sessions</string>
-    <string name="session_finished_toast">%1$s exited (code %2$d). Open the drawer for a new session.</string>
+    <string name="session_finished_toast">%1$s exited (code %2$d). Tap + Shell for a new session.</string>
+    <string name="action_menu">☰ Menu</string>
+    <string name="action_new_shell">+ Shell</string>
+    <string name="action_new_root"># Root</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_paste">Paste</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_mode_txt">TXT View</string>
+    <string name="action_mode_tty">TTY View</string>
+    <string name="cmd_input_hint">Run command in shell (e.g. ls -la, apt update)…</string>
+    <string name="action_run">Run</string>
 
     <!-- Generic -->
     <string name="action_refresh">Refresh</string>

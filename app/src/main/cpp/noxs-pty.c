@@ -58,7 +58,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
  * cmd/env are argv/envp arrays (no shell); child becomes session leader with
  * the pty as its controlling terminal.
  */
-JNIEXPORT jobjectArray JNICALL
+JNIEXPORT jintArray JNICALL
 Java_com_noxs_linux_terminal_emulator_NativePty_create(
         JNIEnv *env, jclass clazz,
         jobjectArray cmd, jobjectArray envArr, jstring cwd,
@@ -74,6 +74,8 @@ Java_com_noxs_linux_terminal_emulator_NativePty_create(
 
     const char *cwd_utf = (*env)->GetStringUTFChars(env, cwd, NULL);
     if (cwd_utf == NULL) { close(master); return NULL; }
+    char *cwd_copy = strdup(cwd_utf);
+    (*env)->ReleaseStringUTFChars(env, cwd, cwd_utf);
 
     int argc = (*env)->GetArrayLength(env, cmd);
     int envc = (*env)->GetArrayLength(env, envArr);
@@ -100,16 +102,19 @@ Java_com_noxs_linux_terminal_emulator_NativePty_create(
     pid_t pid = fork();
     if (pid < 0) {
         LOGW("fork failed: %s", strerror(errno));
+        for (i = 0; i < argc; i++) free(argv[i]);
+        for (i = 0; i < envc; i++) free(envp[i]);
+        free(argv);
+        free(envp);
+        free(cwd_copy);
         close(master);
         return NULL;
     }
 
     if (pid == 0) {
         // ---- child ----
-        // Resolve the slave path BEFORE closing the master: ptsname()/ptsname_r()
-        // require a VALID master fd. The previous order (close, then ptsname)
-        // failed with EBADF -> open(NULL) failed -> EVERY child exited 127
-        // before exec'ing anything: black terminal, zero output, session dead.
+        // Resolve the slave path BEFORE closing the master: ptsname_r()
+        // requires a valid master fd.
         char slave_path[128];
         if (ptsname_r(master, slave_path, sizeof(slave_path)) != 0) _exit(127);
         setsid();
@@ -125,16 +130,38 @@ Java_com_noxs_linux_terminal_emulator_NativePty_create(
         ws.ws_col = (unsigned short) (cols > 0 ? cols : 80);
         ioctl(slave, TIOCSWINSZ, &ws);
 
+        struct termios tio;
+        if (tcgetattr(slave, &tio) == 0) {
+            tio.c_iflag |= ICRNL | IXON;
+            tio.c_oflag |= OPOST | ONLCR;
+            tio.c_lflag |= ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN;
+            tcsetattr(slave, TCSANOW, &tio);
+        }
+
         dup2(slave, 0);
         dup2(slave, 1);
         dup2(slave, 2);
         if (slave > 2) close(slave);
 
-        // sane defaults if the caller did not set them
+        if (cwd_copy != NULL && cwd_copy[0] != '\0') {
+            chdir(cwd_copy);
+        }
+
+        // Restore default signal dispositions (Android Zygote masks/ignores some)
         signal(SIGPIPE, SIG_DFL);
+        signal(SIGINT, SIG_DFL);
+        signal(SIGQUIT, SIG_DFL);
+        signal(SIGTERM, SIG_DFL);
+        signal(SIGCHLD, SIG_DFL);
         setenv("TMPDIR", "/tmp", 0);
 
         execve(argv[0], argv, envp);
+        const char *err = strerror(errno);
+        write_all(2, "\r\n[noxs-pty] execve failed: ", 28);
+        if (argv[0]) write_all(2, argv[0], strlen(argv[0]));
+        write_all(2, " (", 2);
+        write_all(2, err, strlen(err));
+        write_all(2, ")\r\n", 3);
         _exit(127); // execve failed
     }
 
@@ -143,24 +170,21 @@ Java_com_noxs_linux_terminal_emulator_NativePty_create(
     for (i = 0; i < envc; i++) free(envp[i]);
     free(argv);
     free(envp);
+    free(cwd_copy);
 
     g_master_fd = master;
     g_child_pid = pid;
 
-    jclass intArrayClass = (*env)->FindClass(env, "[I");
-    jobjectArray result = (*env)->NewObjectArray(env, 2, intArrayClass, NULL);
-
-    jint pidVal = (jint) pid;
-    jint fdVal = (jint) master;
-    jintArray pidArr = (*env)->NewIntArray(env, 1);
-    (*env)->SetIntArrayRegion(env, pidArr, 0, 1, &pidVal);
-    (*env)->SetObjectArrayElement(env, result, 0, pidArr);
-
-    jintArray fdArr = (*env)->NewIntArray(env, 1);
-    (*env)->SetIntArrayRegion(env, fdArr, 0, 1, &fdVal);
-    (*env)->SetObjectArrayElement(env, result, 1, fdArr);
-
-    (*env)->ReleaseStringUTFChars(env, cwd, cwd_utf);
+    // Return a 1D jintArray {pid, masterFd} matching NativePty.create(...): IntArray?
+    jintArray result = (*env)->NewIntArray(env, 2);
+    if (result == NULL) {
+        close(master);
+        return NULL;
+    }
+    jint out[2];
+    out[0] = (jint) pid;
+    out[1] = (jint) master;
+    (*env)->SetIntArrayRegion(env, result, 0, 2, out);
     return result;
 }
 

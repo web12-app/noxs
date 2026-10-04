@@ -583,4 +583,38 @@ class TerminalEmulator(
         }
         return out
     }
+
+    /** Full transcript (scrollback + non-empty screen lines up to cursor) for Terminal TextView / copy. */
+    fun transcriptText(): String {
+        val sb = StringBuilder()
+        for (i in buffer.scrollbackSize - 1 downTo 0) {
+            val line = buffer.scrollbackLine(i) ?: continue
+            sb.append(line.text())
+            if (!line.lineWrap) sb.append('\n')
+        }
+        val scr = buffer.screen()
+        var lastRow = buffer.cursorRow.coerceIn(0, buffer.rows - 1)
+        for (r in buffer.rows - 1 downTo 0) {
+            if (scr[r].text().isNotEmpty()) {
+                if (r > lastRow) lastRow = r
+                break
+            }
+        }
+        for (r in 0..lastRow) {
+            val line = scr[r]
+            val raw = line.text()
+            if (r == buffer.cursorRow && buffer.cursorVisible) {
+                val col = buffer.cursorCol.coerceAtLeast(0)
+                if (col >= raw.length) {
+                    sb.append(raw).append(" ".repeat((col - raw.length).coerceAtMost(80))).append('█')
+                } else {
+                    sb.append(raw.substring(0, col)).append('█').append(raw.substring(col + 1))
+                }
+            } else {
+                sb.append(raw)
+            }
+            if (r < lastRow && !line.lineWrap) sb.append('\n')
+        }
+        return sb.toString()
+    }
 }

@@ -88,6 +88,7 @@ class UserManagerControl(
         return try {
             val argv = launcher.oneShotArgv(listOf("/usr/sbin/chpasswd"), asRoot = true)
             val pb = ProcessBuilder(argv)
+            launcher.applyEnvTo(pb, mapOf("NOXS_ROOT_LOGIN" to "1"))
             val p = pb.start()
             p.outputStream.use {
                 it.write("${name}:".toByteArray())

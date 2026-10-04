@@ -33,6 +33,9 @@ class NoxsService : Service() {
         super.onCreate()
         val app = application as com.noxs.linux.NoxsApplication
         paths = app.paths
+        if (paths.isInstalled()) {
+            runCatching { RootfsConfigurator.ensureHealthyRootfs(paths) }
+        }
         resources = NoxsResources(paths)
         launcher = ProotLauncher(paths, resources)
         sessions = NoxsSessionManager(paths, launcher, resources)

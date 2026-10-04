@@ -104,15 +104,29 @@ class ProotLauncher(private val paths: NoxsPaths, private val resources: NoxsRes
             "NOXS" to "1",
             "NOXS_VERSION" to NoxsConstants.VERSION_NAME,
             "PROOT_NO_SECCOMP" to "1", // maximizes device compatibility
+            "PROOT_IGNORE_MISSING_BINDINGS" to "1",
             "PROOT_TMP_DIR" to paths.tmp.absolutePath,
             "TMPDIR" to "/tmp"
         )
-        // Bundled proot deps (libtalloc.so, libandroid-shmem.so) live next to
-        // libproot.so in nativeLibraryDir; the dynamic linker needs this to
-        // resolve them. Explicitly set before user overrides.
-        paths.nativeLibDir?.let { env["LD_LIBRARY_PATH"] = it.absolutePath }
+        // Bundled proot deps (libtalloc.so, libandroid-shmem.so, libproot-loader.so)
+        // live next to libproot.so in nativeLibraryDir; the dynamic linker and proot
+        // need these env vars to resolve them.
+        env["PROOT_LOADER"] = paths.prootLoaderBinary.absolutePath
+        env["PROOT_LOADER_32"] = paths.prootLoader32Binary.absolutePath
+        paths.nativeLibDir?.let { dir ->
+            env["LD_LIBRARY_PATH"] = dir.absolutePath
+        }
         env.putAll(extra)
         return env.map { "${it.key}=${it.value}" }.toTypedArray()
+    }
+
+    /** Applies [buildEnv] to a [ProcessBuilder] for one-shot commands. */
+    fun applyEnvTo(pb: ProcessBuilder, extra: Map<String, String> = emptyMap()) {
+        val map = pb.environment()
+        for (kv in buildEnv(extra)) {
+            val idx = kv.indexOf('=')
+            if (idx > 0) map[kv.substring(0, idx)] = kv.substring(idx + 1)
+        }
     }
 
     /** Standard user session command (used by SessionManager). */

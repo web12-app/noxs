@@ -62,6 +62,8 @@ class ProotLauncherTest {
         assertEquals("1", env["NOXS"])
         assertEquals("1", env["PROOT_NO_SECCOMP"])
         assertEquals(paths.tmp.absolutePath, env["PROOT_TMP_DIR"])
+        assertEquals(paths.prootLoaderBinary.absolutePath, env["PROOT_LOADER"])
+        assertEquals(paths.prootLoader32Binary.absolutePath, env["PROOT_LOADER_32"])
     }
 
     @Test fun `missing proot binary is refused`() {

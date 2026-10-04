@@ -8,10 +8,11 @@ package com.noxs.linux.terminal.view
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.ActionMode
 import android.view.GestureDetector
-import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.BaseInputConnection
@@ -20,7 +21,6 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.Scroller
 import com.noxs.linux.terminal.emulator.KeyHandler
-import com.noxs.linux.terminal.emulator.TerminalEmulator
 import com.noxs.linux.terminal.emulator.TerminalSession
 
 class TerminalView @JvmOverloads constructor(
@@ -31,14 +31,21 @@ class TerminalView @JvmOverloads constructor(
     var session: TerminalSession? = null
         private set
 
-    val renderer = TerminalRenderer()
+    val renderer = TerminalRenderer().apply {
+        densityScale = resources.displayMetrics.scaledDensity
+    }
 
-    // Recomputed in updateSize(); NOT lazy — the first measurement would run
-    // before onAttachedToWindow applied the real density scale.
     private var metrics = renderer.measure()
     private val scroller = Scroller(context)
     private var scrollRows = 0
-    private var isFocusedVisual = false
+    private var isFocusedVisual = true
+
+    private val placeholderPaint = Paint().apply {
+        typeface = Typeface.MONOSPACE
+        isAntiAlias = true
+        color = 0xff8a99ad.toInt()
+        textSize = 14f * resources.displayMetrics.scaledDensity
+    }
 
     /** Latched modifiers from the extra-keys bar. */
     var ctrlLatch = false
@@ -94,7 +101,7 @@ class TerminalView @JvmOverloads constructor(
         override fun onActionItemClicked(mode: ActionMode, item: android.view.MenuItem): Boolean {
             when (item.itemId) {
                 1 -> {
-                    val text = session?.emulator?.screenText()?.joinToString("\n") ?: ""
+                    val text = session?.emulator?.transcriptText()?.replace("█", "") ?: ""
                     clipboard.setPrimaryClip(android.content.ClipData.newPlainText("noxs", text))
                 }
                 2 -> pasteFromClipboard()
@@ -121,7 +128,8 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun showSoftInput() {
-        imm.showSoftInput(this, 0)
+        requestFocus()
+        imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
     }
 
     fun pasteFromClipboard() {
@@ -136,13 +144,26 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun sendBytes(data: ByteArray) {
-        session?.write(data)
+        if (ctrlLatch && data.size == 1) {
+            val ch = data[0].toInt() and 0xff
+            val ctrlByte = (ch and 0x1f).toByte()
+            session?.write(byteArrayOf(ctrlByte))
+            clearLatches()
+        } else if (altLatch && data.isNotEmpty()) {
+            session?.write(byteArrayOf(0x1b) + data)
+            clearLatches()
+        } else {
+            session?.write(data)
+        }
         scrollToBottom()
     }
 
     override fun onDraw(canvas: Canvas) {
+        renderer.densityScale = resources.displayMetrics.scaledDensity
         val emu = session?.emulator ?: run {
             canvas.drawColor(0xff10141a.toInt())
+            val pad = 16f * resources.displayMetrics.density
+            canvas.drawText("● Noxs Linux — initializing Debian 12 shell...", pad, pad * 2f, placeholderPaint)
             return
         }
         renderer.render(canvas, emu, metrics, scrollRows, isFocusedVisual, resources.displayMetrics.density)
@@ -151,9 +172,6 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val handled = gestureDetector.onTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_UP && scroller.isFinished) {
-            // nothing extra
-        }
         if (!scroller.isFinished) {
             scroller.computeScrollOffset()
             val max = session?.emulator?.buffer?.scrollbackSize ?: 0
@@ -178,6 +196,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun updateSize() {
+        renderer.densityScale = resources.displayMetrics.scaledDensity
         val m = renderer.measure().also { metrics = it }
         val w = width.takeIf { it > 0 } ?: 720
         val h = height.takeIf { it > 0 } ?: 1200
@@ -190,13 +209,26 @@ class TerminalView @JvmOverloads constructor(
 
     override fun checkInputConnectionProxy(view: android.view.View): Boolean = true
 
-    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
-        if (session == null) return null
-        outAttrs.inputType = EditorInfo.TYPE_NULL // best compat with soft keyboards
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
+        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT or
+            EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+            EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or
+            EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            EditorInfo.IME_ACTION_NONE
         return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
-                sendBytes(text.toString().toByteArray(Charsets.UTF_8))
+                if (text.isNotEmpty()) {
+                    sendBytes(text.toString().toByteArray(Charsets.UTF_8))
+                }
+                return true
+            }
+
+            override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
+                if (text.isNotEmpty()) {
+                    sendBytes(text.toString().toByteArray(Charsets.UTF_8))
+                }
+                finishComposingText()
                 return true
             }
 
@@ -210,6 +242,14 @@ class TerminalView @JvmOverloads constructor(
             override fun performEditorAction(actionCode: Int): Boolean {
                 sendBytes(byteArrayOf('\r'.code.toByte()))
                 return true
+            }
+
+            override fun sendKeyEvent(event: KeyEvent): Boolean {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    onKeyDown(event.keyCode, event)
+                    return true
+                }
+                return super.sendKeyEvent(event)
             }
         }
     }
@@ -235,13 +275,15 @@ class TerminalView @JvmOverloads constructor(
 
         // Arrow with modifiers → word jump
         KeyHandler.modifiedArrow(keyCode, ctrl, shift, emu.appCursorKeys)?.let {
-            sendBytes(it)
+            session?.write(it)
+            scrollToBottom()
             clearLatches()
             return true
         }
 
         KeyHandler.map(keyCode, mods, emu.appCursorKeys)?.let {
-            sendBytes(it)
+            session?.write(it)
+            scrollToBottom()
             clearLatches()
             return true
         }
@@ -250,10 +292,11 @@ class TerminalView @JvmOverloads constructor(
         if (chr != 0) {
             if (ctrl) {
                 // Control codes for punctuation (Ctrl+[ = ESC, Ctrl+Space = NUL…)
-                sendBytes(byteArrayOf((chr and 0x1f).toByte()))
+                session?.write(byteArrayOf((chr and 0x1f).toByte()))
             } else {
-                sendBytes(String(Character.toChars(chr)).toByteArray(Charsets.UTF_8))
+                session?.write(String(Character.toChars(chr)).toByteArray(Charsets.UTF_8))
             }
+            scrollToBottom()
             clearLatches()
             return true
         }
@@ -268,7 +311,7 @@ class TerminalView @JvmOverloads constructor(
             KeyEvent.KEYCODE_VOLUME_DOWN -> 'B'
             else -> return false
         }
-        sendBytes(if (emu.appCursorKeys) "\u001bO$dir".toByteArray() else "\u001b[$dir".toByteArray())
+        session?.write(if (emu.appCursorKeys) "\u001bO$dir".toByteArray() else "\u001b[$dir".toByteArray())
         return true
     }
 
@@ -278,6 +321,7 @@ class TerminalView @JvmOverloads constructor(
         if (ctrlLatch || altLatch) {
             ctrlLatch = false
             altLatch = false
+            (parent?.parent as? android.view.ViewGroup)?.findViewById<NoxsExtraKeysBar>(R.id.extra_keys)?.refreshLatches()
             (parent as? android.view.ViewGroup)?.findViewById<NoxsExtraKeysBar>(R.id.extra_keys)?.refreshLatches()
             invalidate()
         }
@@ -285,9 +329,9 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onCheckIsTextEditor(): Boolean = true
 
-    // Recompute metrics with the real density before first use.
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         renderer.densityScale = resources.displayMetrics.scaledDensity
+        metrics = renderer.measure()
     }
 }

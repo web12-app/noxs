@@ -20,6 +20,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.util.zip.GZIPInputStream
 import org.tukaani.xz.XZInputStream
 
@@ -45,18 +47,19 @@ object TarGuard {
 
     /** Link target validation: link must resolve inside the rootfs. */
     fun isSafeLinkTarget(root: File, linkPath: File, target: String): Boolean {
-        if (target.isEmpty()) return false
+        if (target.isEmpty() || target.contains('\u0000')) return false
         return try {
-            val canonicalRoot = root.canonicalPath
-            val resolved: File = if (target.startsWith("/")) {
-                File(root, target.trimStart('/'))
+            val rootPath = root.toPath().toAbsolutePath().normalize()
+            val linkAbs = linkPath.toPath().toAbsolutePath().normalize()
+            if (!linkAbs.startsWith(rootPath)) return false
+            val resolved = if (target.startsWith("/")) {
+                rootPath.resolve(target.trimStart('/')).normalize()
             } else {
-                val parent = linkPath.parentFile ?: root
-                File(parent, target)
+                val parent = linkAbs.parent ?: rootPath
+                parent.resolve(target).normalize()
             }
-            val canonicalTarget = resolved.canonicalPath
-            canonicalTarget == canonicalRoot || canonicalTarget.startsWith(canonicalRoot + File.separator)
-        } catch (e: IOException) {
+            resolved.startsWith(rootPath)
+        } catch (e: Exception) {
             false
         }
     }
@@ -69,6 +72,7 @@ class RootfsExtractor(private val root: File) {
      * Permissions are applied from tar mode with setuid/setgid/sticky stripped.
      */
     fun extract(archive: File): ExtractedStats {
+        RootfsLinkQueue.drain()
         root.mkdirs()
         if (!root.isDirectory) throw IOException("Cannot create rootfs directory: $root")
         val base: InputStream = BufferedInputStream(FileInputStream(archive), 256 * 1024)
@@ -79,7 +83,6 @@ class RootfsExtractor(private val root: File) {
             else -> { base.close(); throw IOException("Unsupported archive format: ${archive.name}") }
         }
         tarStream.use { stream -> TarReader(stream).readAll(::handleEntry) }
-        // Emit summary through deferred link queue size for logging.
         return ExtractedStats(files, dirs, links, bytes)
     }
 
@@ -88,11 +91,27 @@ class RootfsExtractor(private val root: File) {
     private var links = 0
     private var bytes = 0L
 
+    private fun ensureDirectory(dir: File): Boolean {
+        val path = dir.toPath()
+        if (Files.isSymbolicLink(path)) {
+            val target = runCatching { Files.readSymbolicLink(path).toString() }.getOrNull()
+            if (target != null) {
+                val resolved = if (target.startsWith("/")) {
+                    File(root, target.trimStart('/'))
+                } else {
+                    File(dir.parentFile ?: root, target)
+                }
+                return resolved.isDirectory || resolved.mkdirs()
+            }
+        }
+        return dir.isDirectory || dir.mkdirs() || dir.isDirectory
+    }
+
     private fun handleEntry(entry: TarReader.Entry, payload: InputStream) {
         when (entry.type) {
             TarReader.Type.DIR -> {
                 val dir = TarGuard.safeResolve(root, entry.name)
-                if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
+                if (!ensureDirectory(dir)) {
                     throw IOException("Cannot create directory: ${entry.name}")
                 }
                 dirs++
@@ -102,14 +121,28 @@ class RootfsExtractor(private val root: File) {
                 if (!TarGuard.isSafeLinkTarget(root, link, entry.linkName)) {
                     throw SecurityException("Escaping symlink: ${entry.name} -> ${entry.linkName}")
                 }
-                link.parentFile?.mkdirs()
-                link.delete()
-                if (!link.createNewFile() && !link.exists()) {
-                    throw IOException("Cannot create symlink placeholder: ${entry.name}")
+                link.parentFile?.let { ensureDirectory(it) }
+                val linkPath = link.toPath()
+                // Remove any existing file, broken symlink, or empty directory at linkPath
+                runCatching {
+                    if (Files.isSymbolicLink(linkPath) || Files.exists(linkPath)) {
+                        Files.delete(linkPath)
+                    }
                 }
-                // Android app storage cannot create symlinks directly on all
-                // devices; the critical ones (bin→usr/bin etc.) are re-created
-                // inside the sandbox by RootfsConfigurator on first run.
+                try {
+                    Files.createSymbolicLink(linkPath, Paths.get(entry.linkName))
+                } catch (e: Exception) {
+                    // Fallback via android.system.Os.symlink on older API levels if needed
+                    val createdViaOs = runCatching {
+                        val osClass = Class.forName("android.system.Os")
+                        val m = osClass.getMethod("symlink", String::class.java, String::class.java)
+                        m.invoke(null, entry.linkName, link.absolutePath)
+                        true
+                    }.getOrDefault(false)
+                    if (!createdViaOs && !link.createNewFile() && !link.exists()) {
+                        throw IOException("Cannot create symlink: ${entry.name}", e)
+                    }
+                }
                 RootfsLinkQueue.enqueue(link.absolutePath, entry.linkName)
                 links++
             }
@@ -119,24 +152,35 @@ class RootfsExtractor(private val root: File) {
                     throw SecurityException("Escaping hard link: ${entry.name} -> ${entry.linkName}")
                 }
                 val src = TarGuard.safeResolve(root, entry.linkName)
-                link.parentFile?.mkdirs()
-                if (src.isFile) {
-                    link.delete()
-                    src.copyTo(link, overwrite = true)
-                    applyMode(link, entry.mode)
+                link.parentFile?.let { ensureDirectory(it) }
+                val linkPath = link.toPath()
+                val srcPath = src.toPath()
+                runCatching { Files.deleteIfExists(linkPath) }
+                if (Files.exists(srcPath) || Files.isSymbolicLink(srcPath)) {
+                    val hardlinked = runCatching {
+                        Files.createLink(linkPath, srcPath)
+                        true
+                    }.getOrDefault(false)
+                    if (!hardlinked && src.isFile) {
+                        src.copyTo(link, overwrite = true)
+                        applyMode(link, entry.mode)
+                    }
                 }
                 links++
             }
             TarReader.Type.REGULAR -> {
                 val out = TarGuard.safeResolve(root, entry.name)
                 out.parentFile?.let { p ->
-                    if (!p.isDirectory && !p.mkdirs() && !p.isDirectory) {
+                    if (!ensureDirectory(p)) {
                         throw IOException("Cannot create parent for: ${entry.name}")
                     }
                 }
                 bytes += entry.size
                 if (bytes > NoxsConstants.MAX_ROOTFS_BYTES) {
                     throw SecurityException("Archive exceeds MAX_ROOTFS_BYTES — possible extraction bomb")
+                }
+                runCatching {
+                    if (Files.isSymbolicLink(out.toPath())) Files.delete(out.toPath())
                 }
                 out.outputStream().use { fos -> payload.copyTo(fos, 128 * 1024) }
                 applyMode(out, entry.mode)
@@ -159,8 +203,7 @@ class RootfsExtractor(private val root: File) {
 }
 
 /**
- * Symlinks deferred to first in-sandbox execution (Android cannot create them
- * directly in app-private storage on all devices).
+ * Symlinks recorded during rootfs extraction.
  */
 object RootfsLinkQueue {
     private val links = mutableListOf<Pair<String, String>>() // absolutePath -> target
