@@ -82,7 +82,7 @@ class NoxsProcSampler(
     private val clockMs: () -> Long = { System.currentTimeMillis() }
 ) {
     private var lastCpu: Map<Int, Long> = emptyMap()  // pid -> cpuTicks
-    private var lastTickMs: Long = 0L
+    private var lastTickMs: Long = -1L
     private val firstSeen = HashMap<Int, Long>()
 
     fun uptimeMs(rootPid: Int): Long {
@@ -138,7 +138,7 @@ class NoxsProcSampler(
         }
         lastCpu = cpuNow
 
-        val percent = if (lastTickMs == 0L || now <= lastTickMs) {
+        val percent = if (lastTickMs < 0L || now <= lastTickMs) {
             0.0 // first sample establishes the baseline
         } else {
             val seconds = (now - lastTickMs) / 1000.0
