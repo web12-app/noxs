@@ -270,7 +270,6 @@
     <string name="status_proc_idle">○ %1$s · PID %2$d</string>
     <string name="status_proc_exited">✓ EXITED (%1$d)</string>
     <string name="status_proc_failed">✗ FAILED (%1$d)</string>
-    <string name="err_generic">Something went wrong.</string>
     <string name="setup_status_stopped">■ SETUP STOPPED</string>
     <string name="setup_toolbar_operation">%1$s %2$s</string>
 
@@ -304,7 +303,6 @@
     <string name="settings_reset_confirm_msg">This restores all terminal appearance and behavior settings to defaults. Your Linux filesystem, installed packages, shell history and sessions are not touched.</string>
     <string name="settings_reset_positive">Reset</string>
     <string name="settings_reset_done">Terminal settings restored to defaults</string>
-    <string name="settings_font_size">Font size</string>
     <string name="settings_font_size_desc">Terminal glyph size in sp (10–28)</string>
     <string name="settings_font_family">Font family</string>
     <string name="settings_font_family_desc">Typeface used for terminal output</string>
@@ -348,7 +346,6 @@
     <string name="settings_show_new_output_indicator_desc">Display "↓ N new lines" while you are away</string>
     <string name="settings_auto_follow_running">Auto-follow while running</string>
     <string name="settings_auto_follow_running_desc">Keep following output while a process prints</string>
-    <string name="settings_scrollback">Scrollback</string>
     <string name="settings_scrollback_desc">History lines kept per session (1,000–50,000)</string>
     <string name="settings_confirm_exit">Confirm exit</string>
     <string name="settings_confirm_exit_desc">Ask before leaving while a session is running</string>
