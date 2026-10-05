@@ -49,8 +49,8 @@ noxs/
 ├── sandbox/                sandbox docs (filesystem, users, permissions, sessions)
 ├── packages/               apt config, manifest schema, repository references
 ├── scripts/                bootstrap.sh · build-rootfs.sh · package.sh · test.sh
-├── docs/                   ARCHITECTURE · BOOTSTRAP · SECURITY · TESTING ·
-│                           UNIX-SOCKETS · FAQ
+├── docs/                   APP-FEATURES · ARCHITECTURE · BOOTSTRAP · SECURITY ·
+│                           TESTING · UNIX-SOCKETS · FAQ
 ├── .github/workflows/      android-ci.yml (build + validate + release)
 └── LICENSE, NOTICE.md      Apache-2.0
 ```
@@ -82,7 +82,8 @@ Everything after bootstrap works offline.
 
 Noxs runs entirely inside Android's app sandbox. It does not modify the
 system, does not bypass SELinux or verified boot, and `sudo` manages the Noxs
-environment only. Details: [docs/SECURITY.md](docs/SECURITY.md) ·
+environment only. Details: [app feature guide](docs/APP-FEATURES.md) ·
+[docs/SECURITY.md](docs/SECURITY.md) ·
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [NOTICE.md](NOTICE.md).
 
 ## License
