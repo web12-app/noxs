@@ -25,6 +25,7 @@ object NoxsActivityKind {
     const val DOCKER = "docker"        // Docker container/process Noxs owns
     const val CODESERVER = "codeserver"
     const val PACKAGE = "package"      // apt/dpkg operation
+    const val SETUP = "setup"          // first-time environment bootstrap
     const val BUILD = "build"
 }
 

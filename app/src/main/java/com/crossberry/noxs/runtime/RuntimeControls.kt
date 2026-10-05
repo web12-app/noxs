@@ -49,8 +49,17 @@ class PackageManagerControl(private val exec: OneShotExecutor) {
         return "sudo apt install -y ${ShellUtil.quote(safe)}"
     }
 
-    suspend fun update(): OneShotExecutor.Result =
-        exec.runShell("apt-get update 2>&1 | tail -5", timeoutSec = 300)
+    suspend fun update(): OneShotExecutor.Result {
+        // Single-flight: never overlap with setup / repair / other screens.
+        if (!NoxsPkgTransaction.acquire("packages-screen")) {
+            return OneShotExecutor.Result(1, "", NoxsPkgTransaction.BUSY_MESSAGE)
+        }
+        return try {
+            exec.runShell("apt-get update 2>&1 | tail -5", timeoutSec = 300)
+        } finally {
+            NoxsPkgTransaction.release("packages-screen")
+        }
+    }
 }
 
 class UserManagerControl(

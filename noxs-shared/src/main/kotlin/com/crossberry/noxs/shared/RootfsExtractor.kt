@@ -70,8 +70,16 @@ class RootfsExtractor(private val root: File) {
     /**
      * Extracts a .tar.xz / .tar.gz / .tar [archive] into [root].
      * Permissions are applied from tar mode with setuid/setgid/sticky stripped.
+     *
+     * [onProgress] receives the real cumulative entry count while extraction
+     * runs; [beforeEntry] is invoked before every entry so callers can
+     * abort cooperatively (e.g. user-initiated setup cancellation).
      */
-    fun extract(archive: File): ExtractedStats {
+    fun extract(
+        archive: File,
+        onProgress: (Long) -> Unit = {},
+        beforeEntry: (() -> Unit)? = null
+    ): ExtractedStats {
         RootfsLinkQueue.drain()
         root.mkdirs()
         if (!root.isDirectory) throw IOException("Cannot create rootfs directory: $root")
@@ -82,7 +90,16 @@ class RootfsExtractor(private val root: File) {
             archive.name.endsWith(".tar") -> base
             else -> { base.close(); throw IOException("Unsupported archive format: ${archive.name}") }
         }
-        tarStream.use { stream -> TarReader(stream).readAll(::handleEntry) }
+        var seen = 0L
+        tarStream.use { stream ->
+            TarReader(stream).readAll { entry, payload ->
+                beforeEntry?.invoke()
+                handleEntry(entry, payload)
+                seen++
+                if (seen % 32L == 0L) onProgress(seen)
+            }
+        }
+        onProgress(seen)
         return ExtractedStats(files, dirs, links, bytes)
     }
 

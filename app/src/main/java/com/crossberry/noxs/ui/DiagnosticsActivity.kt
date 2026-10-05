@@ -13,11 +13,18 @@ import android.view.View
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.crossberry.noxs.R
 import com.crossberry.noxs.databinding.ActivityManagerBinding
 import com.crossberry.noxs.runtime.NoxsDeviceCapabilities
+import com.crossberry.noxs.runtime.NoxsDockerProbe
 import com.crossberry.noxs.runtime.NoxsPaths
+import com.crossberry.noxs.runtime.NoxsResources
+import com.crossberry.noxs.runtime.OneShotExecutor
+import com.crossberry.noxs.runtime.ProotLauncher
 import com.crossberry.noxs.shared.NoxsLog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class DiagnosticsActivity : AppCompatActivity() {
 
@@ -51,8 +58,25 @@ class DiagnosticsActivity : AppCompatActivity() {
             caps.toDisplayLines().forEach { (k, v) -> appendLine("$k: $v") }
             caps.detail.forEach { (k, v) -> appendLine("$k: $v") }
             appendLine()
+            appendLine("=== docker (live probe) ===")
+            appendLine("probing real docker state inside Debian…")
+            appendLine()
             appendLine("=== log ring ===")
             NoxsLog.snapshot().forEach { appendLine(it) }
+        }
+
+        // Real probe: docker --version + docker info inside the sandbox.
+        lifecycleScope.launch {
+            val report = runCatching {
+                val launcher = ProotLauncher(paths, NoxsResources(paths))
+                NoxsDockerProbe.probe(OneShotExecutor(launcher))
+            }.getOrElse {
+                NoxsDockerProbe.Report(false, "", false, "probe failed: ${it.message}")
+            }
+            if (isFinishing || isDestroyed) return@launch
+            tv.text = tv.text.toString().replace(
+                "probing real docker state inside Debian…",
+                NoxsDockerProbe.displayLines(report).joinToString("\n"))
         }
     }
 

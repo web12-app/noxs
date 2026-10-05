@@ -112,6 +112,11 @@ class NoxsService : Service() {
                     center.markStopped(record.activityId)
                 }
             }
+            // The setup engine is cooperative: request a cancel and let the
+            // session itself settle the record (COMPLETED/FAILED/CANCELLED).
+            NoxsActivityKind.SETUP -> {
+                (application as com.crossberry.noxs.NoxsApplication).setupSession.cancel()
+            }
             else -> {
                 record.pid?.let { center.stopProcessTree(it) }
                 center.markStopped(record.activityId)

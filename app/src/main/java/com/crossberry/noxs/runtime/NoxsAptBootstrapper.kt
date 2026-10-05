@@ -13,7 +13,8 @@ import java.util.concurrent.TimeUnit
 
 class NoxsAptBootstrapper(
     private val paths: NoxsPaths,
-    private val launcher: ProotLauncher
+    private val launcher: ProotLauncher,
+    private val isCancelled: () -> Boolean = { false }
 ) {
     data class Result(val success: Boolean, val detail: String = "")
 
@@ -23,10 +24,19 @@ class NoxsAptBootstrapper(
      */
     fun initialize(force: Boolean = false, onLog: (String) -> Unit = {}): Result =
         synchronized(PROCESS_LOCK) {
+            if (isCancelled()) throw SetupCancelledException()
             if (!paths.rootfs.isDirectory) return@synchronized Result(false, "Debian rootfs is missing")
             if (!force && paths.aptReadyMarker.isFile) {
                 return@synchronized Result(true, "APT, dpkg and HTTPS were previously verified")
             }
+            // Single-flight package policy: never start a second apt/dpkg
+            // transaction (Noxs-managed or in-shell flag) concurrently.
+            if (NoxsPkgTransaction.currentOwner() != null ||
+                File(paths.rootfsNoxsRun, NoxsPkgTransaction.FLAG_NAME).isFile
+            ) {
+                return@synchronized Result(false, NoxsPkgTransaction.BUSY_MESSAGE)
+            }
+            NoxsPkgTransaction.armFlag(paths, "apt-bootstrap")
 
             try {
                 paths.tmp.mkdirs()
@@ -168,6 +178,8 @@ class NoxsAptBootstrapper(
             } catch (e: Exception) {
                 NoxsLog.e("AptBootstrap", "APT bootstrap failed", e)
                 Result(false, e.message ?: e.javaClass.simpleName)
+            } finally {
+                NoxsPkgTransaction.clearFlag(paths)
             }
         }
 
@@ -175,6 +187,7 @@ class NoxsAptBootstrapper(
         listOf("/usr/bin/apt-get") + APT_OPTIONS + args
 
     private fun run(command: List<String>, timeoutSeconds: Long): CommandResult {
+        if (isCancelled()) throw SetupCancelledException()
         val process = ProcessBuilder(launcher.oneShotArgv(command, asRoot = true)).apply {
             redirectErrorStream(true)
             launcher.applyEnvTo(this, mapOf(

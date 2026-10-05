@@ -13,6 +13,7 @@ import android.os.Looper
 import com.crossberry.noxs.runtime.AndroidSignaller
 import com.crossberry.noxs.runtime.NoxsActivityCenter
 import com.crossberry.noxs.runtime.NoxsPaths
+import com.crossberry.noxs.runtime.NoxsSetupSession
 import com.crossberry.noxs.shared.NoxsLog
 import java.io.File
 
@@ -23,6 +24,13 @@ class NoxsApplication : Application() {
 
     lateinit var activityCenter: NoxsActivityCenter
         private set
+
+    /**
+     * The setup engine + console session. Application-scoped on purpose:
+     * the REAL setup process must survive Activity recreation and background
+     * transitions, and the console reconnects to it from any Activity.
+     */
+    val setupSession: NoxsSetupSession by lazy { NoxsSetupSession(this, paths, activityCenter) }
 
     override fun onCreate() {
         super.onCreate()

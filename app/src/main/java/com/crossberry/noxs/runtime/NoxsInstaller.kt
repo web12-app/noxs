@@ -41,22 +41,33 @@ import java.security.SecureRandom
 class InsufficientStorageException(val requiredBytes: Long, val usableBytes: Long) :
     RuntimeException("insufficient storage: need ${requiredBytes / (1024 * 1024)} MB, usable ${usableBytes / (1024 * 1024)} MB")
 
+/** Raised cooperatively when the user stops the setup console (Ctrl+C / Stop). */
+class SetupCancelledException : RuntimeException("Setup stopped by user")
+
 class NoxsInstaller(
     private val context: Context,
     private val paths: NoxsPaths,
-    private val launcher: ProotLauncher
+    private val launcher: ProotLauncher,
+    private val isCancelled: () -> Boolean = { false }
 ) {
 
     interface Progress {
         fun onStep(step: Int, titleRes: Int, detail: String)
         fun onProgressBytes(downloaded: Long, total: Long)
+        /** Real cumulative tar entry count while the rootfs is being extracted. */
+        fun onExtracted(entries: Long) {}
         fun onLog(line: String)
-        fun onPasswordRequired(): CharArray? // setup wizard collects it
+        fun onPasswordRequired(): CharArray? // setup console collects it
     }
 
     sealed class InstallResult {
         data class Success(val rootfsSha256: String) : InstallResult()
         data class Failure(val userMessageRes: Int, val detail: String) : InstallResult()
+        data object Cancelled : InstallResult()
+    }
+
+    private fun checkCancelled() {
+        if (isCancelled()) throw SetupCancelledException()
     }
 
     var overrideRootfsUrl: String? = null
@@ -65,17 +76,20 @@ class NoxsInstaller(
         progress0 = progress
         try {
             // 1 — architecture detection
+            checkCancelled()
             progress.onStep(1, R.string.setup_step_arch, "")
             val arch = NoxsCapabilitiesArch.detect()
             progress.onLog("arch=$arch")
 
             // 2 — storage initialization
+            checkCancelled()
             progress.onStep(2, R.string.setup_step_storage, "")
             if (!paths.ensureBaseDirs()) {
                 return@withContext InstallResult.Failure(R.string.err_storage, "cannot create app dirs")
             }
 
             // 3 — manifest
+            checkCancelled()
             progress.onStep(3, R.string.setup_step_manifest, arch)
             val manifest = loadManifest(arch)
             progress.onLog("rootfs url=${manifest.rootfs.url}")
@@ -83,6 +97,7 @@ class NoxsInstaller(
             // 4 — proot (bundled in the APK as jniLibs → nativeLibraryDir;
             // exec from app data storage is denied on Android 10+, so there is
             // intentionally NO network step here anymore)
+            checkCancelled()
             progress.onStep(4, R.string.setup_step_proot, "")
             val prootFile = paths.prootBinary
             if (!prootFile.isFile) {
@@ -94,6 +109,7 @@ class NoxsInstaller(
             progress.onLog("proot bundled: ${prootFile.name} (${prootFile.length()} bytes)")
 
             // 5 — rootfs
+            checkCancelled()
             progress.onStep(5, R.string.setup_step_rootfs, "")
             val rootfsArchive = File(paths.cache, "rootfs-$arch.tar.${manifest.rootfs.format.substringAfter('.')}")
             var sha = ""
@@ -108,6 +124,7 @@ class NoxsInstaller(
             }
 
             // 6 — safe extraction
+            checkCancelled()
             progress.onStep(6, R.string.setup_step_extract, "")
             // Extraction can need roughly 3x the archive size as free space.
             val extractNeeded = InstallerPlan.extractionReserveBytes(manifest.rootfs.sizeBytes)
@@ -122,19 +139,27 @@ class NoxsInstaller(
                     f.delete()
                 }
             }
-            val stats = RootfsExtractor(paths.rootfs).extract(rootfsArchive)
+            val extractor = RootfsExtractor(paths.rootfs)
+            val stats = extractor.extract(
+                rootfsArchive,
+                onProgress = { entries -> progress.onExtracted(entries) },
+                beforeEntry = { checkCancelled() }
+            )
             progress.onLog("extracted files=${stats.files} dirs=${stats.dirs} links=${stats.links}")
 
             // 7 — userspace configuration. APT remains on signed HTTP only
             // during the CA-certificate bootstrap; final HTTPS is enabled later.
+            checkCancelled()
             progress.onStep(7, R.string.setup_step_configure, "")
             RootfsConfigurator.configure(context, paths, bootstrapHttpApt = true)
 
             // 8 — noxs user + password
+            checkCancelled()
             progress.onStep(8, R.string.setup_step_user, "")
             provisionUser(progress)
 
             // 9 — runtime state
+            checkCancelled()
             progress.onStep(9, R.string.setup_step_run, "")
             initRuntimeState()
 
@@ -145,8 +170,9 @@ class NoxsInstaller(
             // the terminal clears straight to an active shell; NoxsAptSetup
             // keeps repairing the package layer in the background on every
             // launch until it succeeds.
+            checkCancelled()
             progress.onStep(10, R.string.setup_step_apt, "")
-            val aptResult = NoxsAptBootstrapper(paths, launcher).initialize(
+            val aptResult = NoxsAptBootstrapper(paths, launcher, isCancelled).initialize(
                 force = true,
                 onLog = progress::onLog
             )
@@ -161,6 +187,9 @@ class NoxsInstaller(
             )
             progress.onStep(11, R.string.setup_step_shell, "")
             InstallResult.Success(sha)
+        } catch (e: SetupCancelledException) {
+            NoxsLog.i("Installer", "setup cancelled by user")
+            InstallResult.Cancelled
         } catch (e: InsufficientStorageException) {
             NoxsLog.e("Installer", "storage check failed", e)
             InstallResult.Failure(R.string.err_storage_space, e.message ?: "storage")
@@ -240,11 +269,13 @@ class NoxsInstaller(
         var lastError: Exception? = null
         var downloaded = false
         outer@ for (candidateIndex in candidates.indices) {
+            checkCancelled()
             val url = candidates[candidateIndex]
             if (candidateIndex > 0) {
                 progress.onLog("mirror: trying alternate download server (${candidateIndex + 1}/${candidates.size})")
             }
             for (attempt in 0 until attempts) {
+                checkCancelled()
                 if (attempt > 0) {
                     progress.onLog("retry ${attempt + 1}/$attempts after network error: " +
                         (lastError?.message ?: "unknown"))
@@ -284,6 +315,7 @@ class NoxsInstaller(
                                 val buf = ByteArray(128 * 1024)
                                 var done = if (appending) resumeFrom else 0L
                                 while (true) {
+                                    checkCancelled()
                                     val n = input.read(buf)
                                     if (n < 0) break
                                     out.write(buf, 0, n)
@@ -297,6 +329,7 @@ class NoxsInstaller(
                     }
                     try {
                         // verify BEFORE renaming into place (interrupted downloads never verify)
+                        checkCancelled()
                         doVerify(staged, artifact.sha256)
                         staged.renameTo(dest) || (staged.copyTo(dest, overwrite = true).isFile)
                         downloaded = true
@@ -326,6 +359,7 @@ class NoxsInstaller(
 
     /** Creates the noxs user (uid 1000, sudo group) and sets its password. */
     private fun provisionUser(progress: Progress) {
+        checkCancelled()
         val etc = paths.rootfsEtc
         val passwdFile = File(etc, "passwd")
         val users = PasswdDb.parsePasswd(passwdFile.readText())

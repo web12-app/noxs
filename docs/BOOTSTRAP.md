@@ -36,6 +36,20 @@ Noxs logo → "Linux environment setup"
   → first shell
 ```
 
+## Package-manager safety
+
+Only ONE apt/dpkg transaction may run at a time:
+
+- App-side: `NoxsPkgTransaction` serializes every Noxs-managed operation
+  (setup, background security bootstrap, package screen, Repair).
+- In-shell: `/etc/profile.d/noxs-pkg-guard.sh` wraps `apt`/`apt-get` with a
+  real busy check (Noxs transaction flag in `/run/noxs/pkg-tx` + running
+  dpkg/apt processes) and prints "Noxs package manager is busy." — it never
+  tells the user to delete locks, and locks are never removed by Noxs.
+- Interrupted operations: Setup console → **Repair** runs `dpkg --configure -a`
+  + authenticated dependency repair + CA re-verification through the signed
+  APT bootstrapper, only after the guard confirms nothing else is running.
+
 ## Non-blocking APT security bootstrap
 
 The signed APT/CA/TLS bootstrap never blocks the shell:

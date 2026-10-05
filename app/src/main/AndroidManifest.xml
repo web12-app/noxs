@@ -39,7 +39,8 @@
         <activity
             android:name=".ui.SetupActivity"
             android:exported="false"
-            android:label="@string/title_setup" />
+            android:label="@string/title_setup"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.TerminalActivity"

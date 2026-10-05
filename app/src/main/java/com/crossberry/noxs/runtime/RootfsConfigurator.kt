@@ -64,6 +64,10 @@ object RootfsConfigurator {
         writeFile(File(rootfs, "etc/profile.d/noxs.sh"), NOXS_PROFILE)
         File(rootfs, "etc/profile.d/noxs.sh").setExecutable(false)
 
+        // --- profile.d/noxs-pkg-guard.sh (package-manager serialization) ---
+        writeFile(File(rootfs, "etc/profile.d/noxs-pkg-guard.sh"), NOXS_PKG_GUARD_SH)
+        File(rootfs, "etc/profile.d/noxs-pkg-guard.sh").setExecutable(false)
+
         // --- /etc/environment ---
         writeFile(File(rootfs, "etc/environment"), ENVIRONMENT)
 
@@ -399,6 +403,36 @@ object RootfsConfigurator {
     }
 
     // ------------------------------------------------------------ templates
+
+    /**
+     * Friendly package-manager serialization for interactive shells.
+     * REAL detection only: the app-side transaction flag (/run/noxs/pkg-tx,
+     * armed by every Noxs-managed apt/dpkg one-shot) plus running package
+     * processes. NEVER deletes or bypasses dpkg lock files.
+     */
+    internal val NOXS_PKG_GUARD_SH = """
+        # /etc/profile.d/noxs-pkg-guard.sh — Noxs package-manager guard
+        noxs_pkg_busy() {
+            [ -f /run/noxs/pkg-tx ] && return 0
+            pgrep -x dpkg >/dev/null 2>&1 && return 0
+            pgrep -x apt-get >/dev/null 2>&1 && return 0
+            pgrep -x apt >/dev/null 2>&1 && return 0
+            return 1
+        }
+        noxs_pkg_busy_msg() {
+            printf '%s\n' 'Noxs package manager is busy.'
+            printf '%s\n' 'Another apt/dpkg operation is currently running.'
+            printf '%s\n' 'Wait for it to finish, then run your command again.'
+        }
+        apt() {
+            if noxs_pkg_busy; then noxs_pkg_busy_msg; return 1; fi
+            command apt "\$@"
+        }
+        apt-get() {
+            if noxs_pkg_busy; then noxs_pkg_busy_msg; return 1; fi
+            command apt-get "\$@"
+        }
+    """.trimIndent()
 
     private val NOXS_PROFILE = """
         # /etc/profile.d/noxs.sh — Noxs environment integration

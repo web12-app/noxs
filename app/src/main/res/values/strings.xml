@@ -38,6 +38,26 @@
     <string name="setup_open_terminal">Open terminal</string>
     <string name="apt_background_failed">APT security setup will retry on the next launch. %1$s</string>
 
+    <!-- Setup console: the real terminal IS the setup screen -->
+    <string name="setup_status_idle">● NOXS SETUP</string>
+    <string name="setup_status_awaiting">● AWAITING PASSWORD</string>
+    <string name="setup_status_running">● SETUP RUNNING</string>
+    <string name="setup_status_completed">✓ SETUP COMPLETE</string>
+    <string name="setup_status_failed">✕ SETUP FAILED</string>
+    <string name="setup_status_repairing">● REPAIRING</string>
+    <string name="setup_status_cancelled">■ SETUP STOPPED</string>
+    <string name="setup_action_stop">■ Stop</string>
+    <string name="setup_action_retry">Retry</string>
+    <string name="setup_action_open_shell">Open Shell</string>
+    <string name="setup_action_repair">Repair</string>
+    <string name="setup_action_send">Enter</string>
+    <string name="setup_password_enter">Password:</string>
+    <string name="setup_password_confirm">Confirm:</string>
+    <string name="setup_stop_title">Stop setup?</string>
+    <string name="setup_stop_msg">The active setup process will be stopped. Verified partial downloads are kept and you can retry later.</string>
+    <string name="setup_back_title">Setup is still running</string>
+    <string name="setup_back_msg">Noxs keeps setting up in the background. You can return anytime.</string>
+
     <!-- Terminal -->
     <string name="title_terminal">Terminal</string>
     <string name="terminal_latest">↓ Latest</string>

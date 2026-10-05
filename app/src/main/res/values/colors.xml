@@ -27,5 +27,9 @@
     <color name="noxs_outline_variant">#FF454545</color>
     <color name="noxs_ok">#FFF5F5F5</color>
     <color name="noxs_warn">#FFBDBDBD</color>
+    <!-- Setup console status indicator (matches the in-terminal ANSI palette) -->
+    <color name="noxs_status_ok">#FF3FD07A</color>
+    <color name="noxs_status_warn">#FFD2A63C</color>
+    <color name="noxs_status_err">#FFEF5350</color>
     <color name="ic_launcher_background">#FF000000</color>
 </resources>
