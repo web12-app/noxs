@@ -145,7 +145,7 @@ class NoxsSetupSession(
         val now = System.currentTimeMillis()
         if (doneBytes < totalBytes && now - lastLiveRenderMs < LIVE_RENDER_INTERVAL_MS) return
         lastLiveRenderMs = now
-        val pct = if (totalBytes > 0) (doneBytes * 100 / totalBytes).coerceIn(0, 100) else 0
+        val pct = if (totalBytes > 0) ((doneBytes * 100) / totalBytes).coerceIn(0L, 100L).toInt() else 0
         // Activity Center / notification: real download percentage, throttled.
         if (totalBytes > 0 && now - lastCenterProgressMs >= 1_500L) {
             lastCenterProgressMs = now
