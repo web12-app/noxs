@@ -97,7 +97,7 @@ class FloatingStatusPanel(context: Context) : LinearLayout(context) {
 
         // Buttons
         val buttons = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER }
-        fun button(label: String, onClick: () -> Unit, danger: Boolean = false): View =
+        fun button(label: String, danger: Boolean = false, onClick: () -> Unit): View =
             TextView(context).apply {
                 text = label
                 typeface = Typeface.MONOSPACE
@@ -116,7 +116,7 @@ class FloatingStatusPanel(context: Context) : LinearLayout(context) {
             button(context.getString(com.crossberry.noxs.R.string.float_terminal)) { onTerminal?.invoke() },
             button(context.getString(com.crossberry.noxs.R.string.float_logs)) { onLogs?.invoke() },
             button(context.getString(com.crossberry.noxs.R.string.float_details)) { onDetails?.invoke() },
-            button(context.getString(com.crossberry.noxs.R.string.float_stop), { onStop?.invoke() }, danger = true)
+            button(context.getString(com.crossberry.noxs.R.string.float_stop), danger = true) { onStop?.invoke() }
         ).forEachIndexed { index, b ->
             buttons.addView(b, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = if (index < 3) (6 * dp).toInt() else 0
