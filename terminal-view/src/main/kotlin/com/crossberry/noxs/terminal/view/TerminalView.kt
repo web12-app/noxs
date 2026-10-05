@@ -36,6 +36,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 import android.widget.PopupMenu
 import com.crossberry.noxs.terminal.emulator.KeyHandler
+import com.crossberry.noxs.terminal.emulator.TerminalGesturePolicy
 import com.crossberry.noxs.terminal.emulator.SelectionAutoScroller
 import com.crossberry.noxs.terminal.emulator.TerminalMultiTouchPolicy
 import com.crossberry.noxs.terminal.emulator.TerminalScrollModel

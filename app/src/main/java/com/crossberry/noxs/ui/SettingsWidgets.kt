@@ -57,7 +57,7 @@ object SettingsWidgets {
             textSize = 15f
         }
         column.addView(titleText)
-        if (description.isNotBlank()) {
+        if (!description.isNullOrBlank()) {
             column.addView(TextView(context).apply {
                 text = description
                 setTextColor(TEXT_DIM)

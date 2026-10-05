@@ -271,8 +271,21 @@ object TerminalSettingsStore {
      * returns the reloaded settings object.
      */
     fun putInt(prefs: TerminalPrefs, key: String, value: Int): TerminalSettings {
-        prefs.putInt(key, value)
+        prefs.putInt(key, clampForKey(key, value))
         return load(prefs)
+    }
+
+    /** Clamps a value to the documented bounds of its setting key. */
+    private fun clampForKey(key: String, value: Int): Int = when (key) {
+        "terminal.fontSize" -> value.coerceIn(TerminalSettings.FONT_MIN_SP, TerminalSettings.FONT_MAX_SP)
+        "terminal.scrollbackLines" -> value.coerceIn(TerminalSettings.SCROLLBACK_MIN_LINES, TerminalSettings.SCROLLBACK_MAX_LINES)
+        "terminal.lineSpacing" -> value.coerceIn(TerminalSettings.LINE_SPACING_MIN_PCT, TerminalSettings.LINE_SPACING_MAX_PCT)
+        "terminal.letterSpacing" -> value.coerceIn(TerminalSettings.LETTER_SPACING_MIN_PCT, TerminalSettings.LETTER_SPACING_MAX_PCT)
+        "terminal.cursorBlinkPeriod" -> value.coerceIn(TerminalSettings.CURSOR_BLINK_MIN_MS, TerminalSettings.CURSOR_BLINK_MAX_MS)
+        "terminal.cursorWidth" -> value.coerceIn(TerminalSettings.CURSOR_WIDTH_MIN, TerminalSettings.CURSOR_WIDTH_MAX)
+        "terminal.padding" -> value.coerceIn(TerminalSettings.PADDING_MIN_DP, TerminalSettings.PADDING_MAX_DP)
+        "terminal.opacity" -> value.coerceIn(TerminalSettings.OPACITY_MIN_PCT, TerminalSettings.OPACITY_MAX_PCT)
+        else -> value
     }
 
     fun putBoolean(prefs: TerminalPrefs, key: String, value: Boolean): TerminalSettings {

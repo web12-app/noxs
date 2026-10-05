@@ -70,6 +70,17 @@ class NoxsSetupSession(
     /** Presentation-only tracker; never touches installer state or logs. */
     private val opTracker = SetupOpTracker()
 
+    /** Setup engine scope: independent from any Activity/UI lifecycle. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Cooperative cancel flag — checked by the installer at safe boundaries. */
+    @Volatile
+    private var cancelRequested = false
+
+    /** Held only in memory until chpasswd consumes it; wiped right after. */
+    @Volatile
+    private var password: CharArray? = null
+
     private var liveLineActive = false
     private var liveLineIsSpinner = false
     private var lastSpinnerFrame = ' '

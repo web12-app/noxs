@@ -126,7 +126,7 @@ class TerminalRenderer {
                 if (match.row < firstDocumentRow || match.row > lastDocumentRow) continue
                 val visRow = match.row - firstDocumentRow
                 highlightPaint.color = if (match === currentMatch || match == currentMatch) {
-                    0x9666aaff
+                    0x9666aaff.toInt()
                 } else {
                     0x55666aff
                 }
