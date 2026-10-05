@@ -70,14 +70,14 @@ class NoxsActivityCenter(private val signaller: NoxsSignaller) {
 
     // ---------------------------------------------------------------- mutate
 
-    fun markStarting(activityId: String) = transition(activityId) {
-        if (status == NoxsActivityStatus.QUEUED) copy(status = NoxsActivityStatus.STARTING) else this
+    fun markStarting(activityId: String) = transition(activityId) { current ->
+        if (current.status == NoxsActivityStatus.QUEUED) current.copy(status = NoxsActivityStatus.STARTING) else current
     }
 
-    fun markRunning(activityId: String, pid: Int? = null) = transition(activityId) {
-        copy(
+    fun markRunning(activityId: String, pid: Int? = null) = transition(activityId) { current ->
+        current.copy(
             status = NoxsActivityStatus.RUNNING,
-            pid = pid ?: this.pid,
+            pid = pid ?: current.pid,
             finishedAt = null
         )
     }
@@ -104,14 +104,14 @@ class NoxsActivityCenter(private val signaller: NoxsSignaller) {
             outputBuffers[activityId]?.toList()?.takeLast(maxLines) ?: emptyList()
         }
 
-    fun setProgress(activityId: String, percent: Int) = transition(activityId) {
-        if (percent in 0..100) copy(progress = percent) else this
+    fun setProgress(activityId: String, percent: Int) = transition(activityId) { current ->
+        if (percent in 0..100) current.copy(progress = percent) else current
     }
 
-    fun markCompleted(activityId: String, exitCode: Int? = null) = transition(activityId) {
-        copy(
+    fun markCompleted(activityId: String, exitCode: Int? = null) = transition(activityId) { current ->
+        current.copy(
             status = NoxsActivityStatus.COMPLETED,
-            exitCode = exitCode ?: this.exitCode,
+            exitCode = exitCode ?: current.exitCode,
             finishedAt = System.currentTimeMillis(),
             progress = 100
         )
@@ -127,14 +127,14 @@ class NoxsActivityCenter(private val signaller: NoxsSignaller) {
             )
         }
 
-    fun markStopped(activityId: String) = transition(activityId) {
-        copy(status = NoxsActivityStatus.STOPPED, finishedAt = System.currentTimeMillis())
+    fun markStopped(activityId: String) = transition(activityId) { current ->
+        current.copy(status = NoxsActivityStatus.STOPPED, finishedAt = System.currentTimeMillis())
     }
 
     /** User/service requested a stop: flip to STOPPING, then run the safe stop. */
     fun requestStop(activityId: String) {
-        val record = transition(activityId) {
-            if (status.isTerminal) this else copy(status = NoxsActivityStatus.STOPPING)
+        val record = transition(activityId) { current ->
+            if (current.status.isTerminal) current else current.copy(status = NoxsActivityStatus.STOPPING)
         } ?: return
         if (record.status.isTerminal) return
         NoxsLog.i("Activity", "stopping '${record.title}' (${record.activityId})")

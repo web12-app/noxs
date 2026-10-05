@@ -19,7 +19,7 @@ import com.crossberry.noxs.runtime.NoxsActivityRecord
 import com.crossberry.noxs.runtime.NoxsActivityStatus
 import com.crossberry.noxs.runtime.NoxsTreeUsage
 
-class FloatingStatusPanel(context: Context) : FrameLayout(context) {
+class FloatingStatusPanel(context: Context) : LinearLayout(context) {
 
     var onTerminal: (() -> Unit)? = null
     var onLogs: (() -> Unit)? = null
@@ -42,11 +42,12 @@ class FloatingStatusPanel(context: Context) : FrameLayout(context) {
         setPadding(pad, pad, pad, pad)
 
         orientation = VERTICAL
-        val cardParams = LayoutParams(
-            LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT,
+        // Placement inside the terminal FrameLayout overlay: docked bottom card.
+        layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM
         ).apply { setMargins((8 * dp).toInt(), 0, (8 * dp).toInt(), (8 * dp).toInt()) }
-        layoutParams = cardParams
 
         // Header: Noxs + status
         val header = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
