@@ -48,6 +48,7 @@ jobs:
 
       - name: Provision wrapper if missing
         run: |
+          chmod +x gradlew 2>/dev/null || true
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
             gradle wrapper --gradle-version 8.7
           fi
@@ -104,6 +105,7 @@ jobs:
 
       - name: Run security-focused unit tests
         run: |
+          chmod +x gradlew 2>/dev/null || true
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
           ./gradlew noxs-shared:test terminal-emulator:test
 
@@ -186,6 +188,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
           RELEASE_VERSION_CODE: ${{ steps.release_version.outputs.code }}
         run: |
+          chmod +x gradlew 2>/dev/null || true
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
           ./gradlew assembleRelease --stacktrace \
             -PnoxsVersionName="$RELEASE_VERSION" \
