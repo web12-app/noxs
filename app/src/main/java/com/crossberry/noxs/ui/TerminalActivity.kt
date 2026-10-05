@@ -35,16 +35,14 @@ import com.crossberry.noxs.databinding.ActivityTerminalBinding
 import com.crossberry.noxs.runtime.AndroidProcSource
 import com.crossberry.noxs.runtime.NoxsActivityCenter
 import com.crossberry.noxs.runtime.NoxsActivityRecord
-import com.crossberry.noxs.runtime.NoxsAptBootstrapper
+import com.crossberry.noxs.runtime.NoxsAptSetup
 import com.crossberry.noxs.runtime.NoxsPaths
 import com.crossberry.noxs.runtime.NoxsProcSampler
 import com.crossberry.noxs.runtime.NoxsResources
-import com.crossberry.noxs.runtime.NoxsRuntimeFactory
 import com.crossberry.noxs.runtime.NoxsService
 import com.crossberry.noxs.runtime.NoxsSessionManager
 import com.crossberry.noxs.runtime.NoxsStorageBridge
 import com.crossberry.noxs.runtime.NoxsTreeUsage
-import com.crossberry.noxs.runtime.RootfsConfigurator
 import com.crossberry.noxs.runtime.RuntimeHolder
 import com.crossberry.noxs.terminal.emulator.TerminalSession
 import com.crossberry.noxs.terminal.emulator.TerminalSessionClient
@@ -74,10 +72,10 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     )
 
     private var current: NoxsSessionManager.Entry? = null
-    private var aptInitializationStarted = false
-    private var aptInitializationComplete = false
-    private var aptInitializationError: String? = null
-    private var pendingRootSession = false
+
+    // One-shot guard: the background APT repair failure toast is shown once
+    // per resumed session, never per state re-emission.
+    private var aptFailureAnnounced = false
 
     // Nullable (not lateinit): adoptRuntimeNow() collects the sessions StateFlow,
     // which can emit synchronously during onCreate before/around adapter binding.
@@ -203,7 +201,9 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
             autoCreatePending = true
             fulfillAutoCreateIfReady()
         }
-        startAptInitialization()
+        // APT security setup runs in the service background (NoxsAptSetup).
+        // It never gates the shell: observe it only for a failure notice.
+        observeAptSetup()
         onNewIntent(intent)
     }
 
@@ -227,46 +227,38 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     private var autoCreatePending = false
 
     private fun fulfillAutoCreateIfReady() {
-        if (!autoCreatePending || !aptInitializationComplete) return
+        if (!autoCreatePending) return
         val mgr = sessionManager ?: RuntimeHolder.sessions ?: return
         sessionManager = mgr
         autoCreatePending = false
         val list = mgr.sessions.value
         if (list.isEmpty()) {
-            newSession(root = pendingRootSession)
+            newSession(root = false)
         } else if (current == null) {
             current = list.first()
             attachCurrent()
         }
     }
 
-    private fun startAptInitialization() {
-        if (aptInitializationStarted) return
-        aptInitializationStarted = true
-        binding.statusSession.text = "Preparing Debian packages"
+    /**
+     * Observes the service-side APT bootstrap purely for diagnostics. The
+     * shell is never blocked on it; a failed repair is announced once and
+     * retried automatically on the next launch.
+     */
+    private fun observeAptSetup() {
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    RootfsConfigurator.ensureHealthyRootfs(paths)
-                    val resources = NoxsResources(paths)
-                    val launcher = NoxsRuntimeFactory.launcher(paths, resources)
-                    NoxsAptBootstrapper(paths, launcher).initialize()
-                }.getOrElse {
-                    NoxsAptBootstrapper.Result(false, it.message ?: it.javaClass.simpleName)
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                NoxsAptSetup.state.collect { state ->
+                    if (state === NoxsAptSetup.State.FAILED && !aptFailureAnnounced) {
+                        aptFailureAnnounced = true
+                        Toast.makeText(
+                            this@TerminalActivity,
+                            getString(R.string.apt_background_failed, NoxsAptSetup.detail.take(160)),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
-            aptInitializationComplete = true
-            if (result.success) {
-                binding.statusSession.text = getString(R.string.title_terminal)
-            } else {
-                aptInitializationError = result.detail
-                Toast.makeText(
-                    this@TerminalActivity,
-                    "APT/TLS setup did not finish. Noxs will retry automatically next time. ${result.detail.take(180)}",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            fulfillAutoCreateIfReady()
         }
     }
 
@@ -309,12 +301,8 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     }
 
     private fun newSession(root: Boolean) {
-        if (!aptInitializationComplete) {
-            autoCreatePending = true
-            pendingRootSession = root
-            Toast.makeText(this, "Preparing Debian package security before opening the shell…", Toast.LENGTH_SHORT).show()
-            return
-        }
+        // No setup gates here by design: the terminal clears straight to an
+        // active shell while the APT security layer repairs in the background.
         val mgr = sessionManager ?: RuntimeHolder.sessions ?: run {
             Toast.makeText(this, R.string.err_generic, Toast.LENGTH_SHORT).show()
             return
@@ -330,13 +318,6 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
                 current = entry
                 attachCurrent()
                 binding.drawer.closeDrawer(GravityCompat.START)
-                aptInitializationError?.let { detail ->
-                    Toast.makeText(
-                        this,
-                        "APT remains unavailable; Noxs will retry on the next launch. ${detail.take(180)}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
             }
             .onFailure {
                 Toast.makeText(this, it.message ?: getString(R.string.err_generic), Toast.LENGTH_LONG).show()

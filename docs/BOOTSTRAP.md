@@ -36,6 +36,21 @@ Noxs logo → "Linux environment setup"
   → first shell
 ```
 
+## Non-blocking APT security bootstrap
+
+The signed APT/CA/TLS bootstrap never blocks the shell:
+
+- During setup, a failed APT step is **non-fatal by design**: setup still
+  completes (rootfs + user + sudo are what a shell needs) and the user reaches
+  an active prompt immediately.
+- On every service start, `NoxsAptSetup` runs the same signed bootstrap in the
+  background until the `apt-bootstrap-v1.ready` marker exists (idempotent,
+  guarded by `PROCESS_LOCK` and a per-process atomic). The terminal is never
+  gated on it — no "Preparing Debian packages" state exists anymore.
+- If the background repair fails, the terminal shows one informational toast
+  and the repair is retried automatically on the next launch. APT metadata
+  remains usable over signed HTTP in the meantime.
+
 ## Interruption safety
 
 - Downloads use a `.part` staging file; the final name only appears after

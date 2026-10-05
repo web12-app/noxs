@@ -48,13 +48,15 @@ class NoxsService : Service() {
         val app = application as com.crossberry.noxs.NoxsApplication
         paths = app.paths
         center = app.activityCenter
-        // TerminalActivity performs rootfs repair and the signed APT/CA
-        // bootstrap off the main thread before creating the first shell.
+        // Security bootstrap (APT/CA/TLS repair) runs here in the service
+        // background: it must never gate shell creation. The terminal always
+        // clears straight to an active shell while this runs.
         resources = NoxsResources(paths)
         launcher = ProotLauncher(paths, resources)
         sessions = NoxsSessionManager(paths, launcher, resources, center)
         socketServer = NoxsSocketServer(paths, sessions)
         RuntimeHolder.set(this, sessions, socketServer)
+        NoxsAptSetup.startIfInstalled(paths, launcher, scope)
 
         center.stopHandler = { record -> performSafeStop(record) }
 

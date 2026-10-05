@@ -139,14 +139,20 @@ class NoxsInstaller(
             initRuntimeState()
 
             // 10 — initialize dpkg/APT, repair CA certificates over signed
-            // Debian HTTP metadata, then require a successful verified HTTPS update.
+            // Debian HTTP metadata, then switch to a verified HTTPS update.
+            // NON-FATAL BY DESIGN: a shell does not need APT state. If this
+            // step fails (slow or restricted network) setup still completes so
+            // the terminal clears straight to an active shell; NoxsAptSetup
+            // keeps repairing the package layer in the background on every
+            // launch until it succeeds.
             progress.onStep(10, R.string.setup_step_apt, "")
             val aptResult = NoxsAptBootstrapper(paths, launcher).initialize(
                 force = true,
                 onLog = progress::onLog
             )
             if (!aptResult.success) {
-                return@withContext InstallResult.Failure(R.string.err_bootstrap, aptResult.detail)
+                NoxsLog.e("Installer", "APT bootstrap unfinished; deferring to background repair: ${aptResult.detail}")
+                progress.onLog("APT security setup will continue in the background")
             }
 
             // marker

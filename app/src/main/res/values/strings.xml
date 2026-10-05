@@ -36,6 +36,7 @@
     <string name="setup_done">Noxs is ready</string>
     <string name="setup_done_msg">Your Linux environment is ready.</string>
     <string name="setup_open_terminal">Open terminal</string>
+    <string name="apt_background_failed">APT security setup will retry on the next launch. %1$s</string>
 
     <!-- Terminal -->
     <string name="title_terminal">Terminal</string>
