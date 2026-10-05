@@ -3,16 +3,19 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val noxsVersionName = providers.gradleProperty("noxsVersionName").orElse("0.1.7").get()
+val noxsVersionCode = providers.gradleProperty("noxsVersionCode").orElse("1007").get().toInt()
+
 android {
-    namespace = "com.noxs.linux"
+    namespace = "com.crossberry.noxs"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.noxs.linux"
+        applicationId = "com.crossberry.noxs"
         minSdk = 24
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.1.6"
+        versionCode = noxsVersionCode
+        versionName = noxsVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
@@ -51,8 +54,6 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
         }
         release {
             isMinifyEnabled = true
@@ -103,6 +104,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 

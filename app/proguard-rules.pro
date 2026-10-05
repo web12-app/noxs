@@ -1,11 +1,11 @@
 # Noxs ProGuard/R8 rules (original)
 
 # Keep the JNI bridge names — they are called from C by exact symbol name.
--keep class com.noxs.linux.terminal.emulator.NativePty { *; }
+-keep class com.crossberry.noxs.terminal.emulator.NativePty { *; }
 
 # MiniJson reflection-free but keep the manifest model shapes for logging.
--keep class com.noxs.linux.shared.BootstrapManifest { *; }
--keep class com.noxs.linux.shared.BootstrapArtifact { *; }
+-keep class com.crossberry.noxs.shared.BootstrapManifest { *; }
+-keep class com.crossberry.noxs.shared.BootstrapArtifact { *; }
 
 # Coroutines
 -dontwarn kotlinx.coroutines.**

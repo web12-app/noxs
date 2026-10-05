@@ -62,29 +62,34 @@ if [ "$MODE" = "--all" ] || [ "$MODE" = "--sync-check" ]; then
             app/src/main/assets/bootstrap/arm64-v8a/bootstrap.manifest || fail "manifest copy differs"
     diff -u linux-runtime/rootfs/overlay/etc/profile.d/noxs.sh \
             <(sed -n '/NOXS_PROFILE = \"\"\"/,/\"\"\".trimIndent()/p' \
-                app/src/main/java/com/noxs/linux/runtime/RootfsConfigurator.kt \
+                app/src/main/java/com/crossberry/noxs/runtime/RootfsConfigurator.kt \
               | sed '1d;$d') >/dev/null 2>&1 \
         || echo "  note: profile.sh is generated with template escapes; visual diff only"
     # The noxs CLI must match its Kotlin template (after un-escaping ${'$'})
     python3 - <<'PY' || fail "noxs CLI copy differs"
 import pathlib, re, sys
-kt = pathlib.Path('app/src/main/java/com/noxs/linux/runtime/NoxsCliTemplate.kt').read_text()
+kt = pathlib.Path('app/src/main/java/com/crossberry/noxs/runtime/NoxsCliTemplate.kt').read_text()
 m = re.search(r'val CLI = """\n?(.*?)"""', kt, re.S)
 if not m:
     print('  template markers not found'); sys.exit(1)
 embedded = m.group(1).replace("${'$'}", "$")
 canonical = pathlib.Path('linux-runtime/launcher/noxs-cli').read_text()
-if embedded != canonical:
-    print('  DIFF: run scripts/sync-cli.sh to regenerate the canonical copy')
+m2 = re.search(r'val STORAGE_SETUP = """\n?(.*?)"""', kt, re.S)
+if not m2:
+    print('  storage setup template markers not found'); sys.exit(1)
+storage_setup = m2.group(1).replace("${'$'}", "$")
+canonical_setup = pathlib.Path('linux-runtime/launcher/noxs-setup-storage').read_text()
+if embedded != canonical or storage_setup != canonical_setup:
+    print('  DIFF: run scripts/sync-cli.sh to regenerate the canonical copies')
     sys.exit(1)
-print('  OK noxs-cli matches template')
+print('  OK noxs-cli and noxs-setup-storage match their templates')
 PY
 fi
 
 # ---- shell tooling --------------------------------------------------------
 if [ "$MODE" = "--all" ] || [ "$MODE" = "--scripts" ]; then
     step "shell checks"
-    SHELLS="$(ls scripts/*.sh linux-runtime/launcher/noxs-launch.sh linux-runtime/service-manager/noxs-service linux-runtime/socket-manager/noxs-socket linux-runtime/process-manager/noxs-ps 2>/dev/null)"
+    SHELLS="$(ls scripts/*.sh linux-runtime/launcher/noxs-launch.sh linux-runtime/launcher/noxs-cli linux-runtime/launcher/noxs-setup-storage linux-runtime/service-manager/noxs-service linux-runtime/socket-manager/noxs-socket linux-runtime/process-manager/noxs-ps 2>/dev/null)"
     for f in $SHELLS; do
         bash -n "$f" || fail "syntax: $f"
     done

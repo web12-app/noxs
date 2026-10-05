@@ -5,10 +5,10 @@
 # This script documents exactly how a Noxs Debian session is created.
 #
 # NOXS_BASE = app-private base dir, e.g.:
-#   /data/data/com.noxs.linux/files/noxs
+#   /data/data/com.crossberry.noxs/files/noxs
 # Run from an adb shell on a DEBUG build for diagnostics.
 
-NOXS_BASE="${1:-/data/data/com.noxs.linux/files/noxs}"
+NOXS_BASE="${1:-/data/data/com.crossberry.noxs/files/noxs}"
 ROOTFS="$NOXS_BASE/rootfs"
 PROOT="$NOXS_BASE/bin/proot"
 

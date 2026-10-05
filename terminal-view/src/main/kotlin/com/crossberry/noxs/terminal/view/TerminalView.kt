@@ -1,0 +1,846 @@
+/*
+ * Noxs terminal-view — original implementation.
+ * Interactive Android terminal View: IME input, hardware keys, gestures
+ * (scroll / copy / paste), resize propagation and renderer glue.
+ */
+package com.crossberry.noxs.terminal.view
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.os.SystemClock
+import android.util.AttributeSet
+import android.view.ActionMode
+import android.view.GestureDetector
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
+import android.widget.OverScroller
+import android.widget.PopupMenu
+import com.crossberry.noxs.terminal.emulator.KeyHandler
+import com.crossberry.noxs.terminal.emulator.SelectionAutoScroller
+import com.crossberry.noxs.terminal.emulator.TerminalGesturePolicy
+import com.crossberry.noxs.terminal.emulator.TerminalSelection
+import com.crossberry.noxs.terminal.emulator.TerminalSelectionPoint
+import com.crossberry.noxs.terminal.emulator.TerminalSession
+import com.crossberry.noxs.terminal.emulator.TerminalViewportState
+import com.crossberry.noxs.terminal.emulator.copyText
+import com.crossberry.noxs.terminal.emulator.resolveSelection
+import com.crossberry.noxs.terminal.emulator.selectAllText
+
+class TerminalView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : android.view.View(context, attrs) {
+
+    var session: TerminalSession? = null
+        private set
+
+    val renderer = TerminalRenderer().apply {
+        densityScale = resources.displayMetrics.scaledDensity
+    }
+
+    private var metrics = renderer.measure()
+    private val scroller = OverScroller(context)
+    private val viewport = TerminalViewportState()
+    private val gesturePolicy = TerminalGesturePolicy()
+    private val edgeAutoScroller = SelectionAutoScroller(48f * resources.displayMetrics.density)
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private var scrollPixelRemainder = 0f
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var lastTouchY = 0f
+    private var touchScrollActive = false
+    private var isFocusedVisual = true
+    private var selection: TerminalSelection? = null
+    private var selectionGesture = false
+    private var draggingEndpoint: SelectionEndpoint? = null
+    private var pointerX = 0f
+    private var pointerY = 0f
+    private var lastAutoScrollFrameMs = 0L
+    private var edgeAutoScrollScheduled = false
+    private var actionMode: ActionMode? = null
+    private var cursorBlinkOn = true
+    private var composingText = ""
+
+    private enum class SelectionEndpoint { ANCHOR, FOCUS }
+
+    private val cursorBlinkRunnable = object : Runnable {
+        override fun run() {
+            if (!isAttachedToWindow || !hasFocus()) return
+            cursorBlinkOn = !cursorBlinkOn
+            invalidate()
+            postDelayed(this, CURSOR_BLINK_MS)
+        }
+    }
+
+    private data class Cell(val point: TerminalSelectionPoint, val column: Int)
+
+    private val edgeAutoScrollRunnable = object : Runnable {
+        override fun run() {
+            edgeAutoScrollScheduled = false
+            if (selection == null || (draggingEndpoint == null && !selectionGesture)) {
+                stopEdgeAutoScroll()
+                return
+            }
+            val now = SystemClock.uptimeMillis()
+            val elapsed = if (lastAutoScrollFrameMs == 0L) 16L else (now - lastAutoScrollFrameMs).coerceIn(1L, 50L)
+            lastAutoScrollFrameMs = now
+            val rowDelta = edgeAutoScroller.step(pointerY, height.toFloat(), elapsed)
+            if (rowDelta != 0) scrollViewportByRows(rowDelta)
+            updateSelectionFromPointer(pointerX, pointerY)
+            if (edgeAutoScroller.rowsPerSecond(pointerY, height.toFloat()) != 0f) {
+                scheduleEdgeAutoScroll()
+            } else {
+                stopEdgeAutoScroll()
+            }
+        }
+    }
+
+    private val placeholderPaint = Paint().apply {
+        typeface = Typeface.MONOSPACE
+        isAntiAlias = true
+        color = 0xffbdbdbd.toInt()
+        textSize = 14f * resources.displayMetrics.scaledDensity
+    }
+
+    /** Latched modifiers from the extra-keys bar. */
+    var ctrlLatch = false
+    var altLatch = false
+
+    var onScreenUpdated: (() -> Unit)? = null
+    var onSessionResized: ((rows: Int, cols: Int) -> Unit)? = null
+    var onTerminalLinkClick: ((uri: String) -> Boolean)? = null
+    /** true when attached to the live bottom; used for the "Latest" affordance. */
+    var onScrollStateChanged: ((atLiveBottom: Boolean) -> Unit)? = null
+
+    private val clipboard by lazy { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    private val imm by lazy { context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager }
+
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean {
+            if (!scroller.isFinished) scroller.abortAnimation()
+            scrollPixelRemainder = 0f
+            return true
+        }
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            val cell = cellAt(e.x, e.y)
+            val uri = cell?.let { terminalHyperlinkAt(it) }
+            if (uri != null && onTerminalLinkClick?.invoke(uri) == true) return true
+            requestFocus()
+            showSoftInput()
+            return true
+        }
+
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+            if (selectionGesture && gesturePolicy.isSelecting) {
+                updatePointer(e2.x, e2.y)
+                updateSelectionFromPointer(pointerX, pointerY)
+                updateEdgeAutoScroll()
+                return true
+            }
+            if (draggingEndpoint != null || gesturePolicy.isDraggingHandle) return true
+            // Raw MotionEvent deltas are applied once in onTouchEvent; using
+            // GestureDetector's distance here as well can double-scroll and is
+            // sensitive to gesture sign conventions across Android versions.
+            if (gesturePolicy.shouldStartVerticalScroll(dx, dy, touchSlop)) {
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            return true
+        }
+
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+            if (selectionGesture || draggingEndpoint != null || gesturePolicy.isSelecting || gesturePolicy.isDraggingHandle) return true
+            startFling(vy)
+            return true
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            val cell = cellAt(e.x, e.y) ?: return
+            if (!gesturePolicy.onLongPress()) return
+            beginSelection(cell, e.x, e.y)
+        }
+    })
+
+    private val callback = object : ActionMode.Callback2() {
+        override fun onCreateActionMode(mode: ActionMode, menu: android.view.Menu): Boolean {
+            actionMode = mode
+            menu.add(0, ACTION_COPY, 0, "Copy")
+            menu.add(0, ACTION_PASTE, 1, "Paste")
+            menu.add(0, ACTION_MORE, 2, "More…")
+            return true
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: android.view.Menu) = false
+
+        override fun onActionItemClicked(mode: ActionMode, item: android.view.MenuItem): Boolean = when (item.itemId) {
+            ACTION_COPY -> {
+                copySelectionToClipboard()
+                mode.finish()
+                true
+            }
+            ACTION_PASTE -> {
+                pasteFromClipboard()
+                mode.finish()
+                true
+            }
+            ACTION_MORE -> {
+                showMoreSelectionMenu()
+                true
+            }
+            else -> false
+        }
+
+        override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
+            val locations = currentHandleLocations()
+            val location = when (draggingEndpoint) {
+                SelectionEndpoint.ANCHOR -> locations.anchor
+                SelectionEndpoint.FOCUS -> locations.focus
+                null -> locations.focus ?: locations.anchor
+            }
+            if (location == null) {
+                outRect.set(0, 0, width.coerceAtLeast(1), height.coerceAtLeast(1))
+            } else {
+                // Keep the floating Copy/Paste/More… pill beside the active end
+                // of a long selection, like the platform text-selection toolbar.
+                val pad = (24f * resources.displayMetrics.density).toInt()
+                val left = (location.x.toInt() - pad).coerceAtLeast(0)
+                val top = (location.y.toInt() - pad).coerceAtLeast(0)
+                val right = (location.x.toInt() + pad).coerceAtMost(width)
+                val bottom = (location.y.toInt() + pad).coerceAtMost(height)
+                outRect.set(left, top, right.coerceAtLeast(left + 1), bottom.coerceAtLeast(top + 1))
+            }
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode) {
+            if (actionMode === mode) actionMode = null
+            selectionGesture = false
+            draggingEndpoint = null
+            stopEdgeAutoScroll()
+            selection = null
+            invalidate()
+        }
+    }
+
+    private fun terminalHyperlinkAt(cell: Cell): String? {
+        val emu = session?.emulator ?: return null
+        return synchronized(emu) { emu.hyperlinkAtDocumentPosition(cell.point.lineIdentity, cell.column) }
+    }
+
+    private fun visibleRowCount(buffer: com.crossberry.noxs.terminal.emulator.TerminalBuffer? = session?.emulator?.buffer): Int {
+        if (buffer == null) return 1
+        val measured = if (metrics.charHeight > 0f) (height / metrics.charHeight).toInt() else buffer.rows
+        return measured.coerceAtLeast(1).coerceAtMost(buffer.rows.coerceAtLeast(1))
+    }
+
+    private fun cellAt(x: Float, y: Float): Cell? {
+        if (metrics.charWidth <= 0f || metrics.charHeight <= 0f) return null
+        val emu = session?.emulator ?: return null
+        return synchronized(emu) {
+            val buffer = emu.buffer
+            val rowCount = visibleRowCount(buffer)
+            val visibleRow = (y / metrics.charHeight).toInt().coerceIn(0, rowCount - 1)
+            val firstRow = buffer.viewportStartDocumentRow(viewport.scrollOffsetFromBottom, rowCount)
+            val documentRow = firstRow + visibleRow
+            val line = buffer.documentLineAt(documentRow) ?: return@synchronized null
+            val colCount = minOf(buffer.cols, line.chars.size)
+            if (colCount <= 0) return@synchronized null
+            val column = (x / metrics.charWidth).toInt().coerceIn(0, colCount - 1)
+            Cell(TerminalSelectionPoint(line.identity, column), column)
+        }
+    }
+
+    private fun currentHandleLocations(): TerminalRenderer.HandleLocations {
+        val selected = selection ?: return TerminalRenderer.HandleLocations(null, null)
+        val emu = session?.emulator ?: return TerminalRenderer.HandleLocations(null, null)
+        return synchronized(emu) {
+            renderer.selectionHandleLocations(
+                emu.buffer,
+                selected,
+                viewport.scrollOffsetFromBottom,
+                visibleRowCount(emu.buffer),
+                metrics.charWidth,
+                metrics.charHeight,
+                width,
+                height,
+                resources.displayMetrics.density
+            )
+        }
+    }
+
+    private fun handleAt(x: Float, y: Float): SelectionEndpoint? {
+        if (selection == null) return null
+        val locations = currentHandleLocations()
+        val radius = HANDLE_HIT_RADIUS_DP * resources.displayMetrics.density
+        fun distance(location: TerminalRenderer.HandleLocation?): Float = location?.let {
+            val dx = x - it.x
+            val dy = y - it.y
+            dx * dx + dy * dy
+        } ?: Float.POSITIVE_INFINITY
+        val anchorDistance = distance(locations.anchor)
+        val focusDistance = distance(locations.focus)
+        val maxDistance = radius * radius
+        if (anchorDistance > maxDistance && focusDistance > maxDistance) return null
+        return if (anchorDistance <= focusDistance) SelectionEndpoint.ANCHOR else SelectionEndpoint.FOCUS
+    }
+
+    private fun beginSelection(cell: Cell, x: Float, y: Float) {
+        val point = cell.point
+        selection = TerminalSelection(point, point)
+        selectionGesture = true
+        draggingEndpoint = null
+        updatePointer(x, y)
+        parent?.requestDisallowInterceptTouchEvent(true)
+        actionMode?.finish()
+        startActionMode(callback, ActionMode.TYPE_FLOATING)?.let { actionMode = it }
+        actionMode?.invalidateContentRect()
+        invalidate()
+    }
+
+    private fun updatePointer(x: Float, y: Float) {
+        pointerX = x
+        pointerY = y
+    }
+
+    private fun updateSelectionFromPointer(x: Float, y: Float) {
+        val cell = cellAt(x, y) ?: return
+        val current = selection ?: return
+        selection = when (draggingEndpoint) {
+            SelectionEndpoint.ANCHOR -> current.copy(anchor = cell.point)
+            SelectionEndpoint.FOCUS, null -> current.copy(focus = cell.point)
+        }
+        actionMode?.invalidateContentRect()
+        invalidate()
+    }
+
+    private fun updateEdgeAutoScroll() {
+        if (selection == null || (draggingEndpoint == null && !selectionGesture) ||
+            edgeAutoScroller.rowsPerSecond(pointerY, height.toFloat()) == 0f) {
+            stopEdgeAutoScroll()
+            return
+        }
+        if (lastAutoScrollFrameMs == 0L) lastAutoScrollFrameMs = SystemClock.uptimeMillis()
+        scheduleEdgeAutoScroll()
+    }
+
+    private fun scheduleEdgeAutoScroll() {
+        if (edgeAutoScrollScheduled) return
+        edgeAutoScrollScheduled = true
+        postOnAnimation(edgeAutoScrollRunnable)
+    }
+
+    private fun stopEdgeAutoScroll() {
+        removeCallbacks(edgeAutoScrollRunnable)
+        edgeAutoScrollScheduled = false
+        lastAutoScrollFrameMs = 0L
+        edgeAutoScroller.reset()
+    }
+
+    private fun scrollByPixels(distanceY: Float) {
+        if (metrics.charHeight <= 0f) return
+        scrollPixelRemainder += distanceY
+        val rows = (scrollPixelRemainder / metrics.charHeight).toInt()
+        if (rows == 0) return
+        scrollPixelRemainder -= rows * metrics.charHeight
+        scrollViewportByRows(rows)
+    }
+
+    private fun scrollViewportByRows(rows: Int) {
+        val emu = session?.emulator ?: return
+        synchronized(emu) { viewport.scrollByRows(rows, emu.buffer, visibleRowCount(emu.buffer)) }
+        notifyScrollState()
+        invalidate()
+    }
+
+    private fun startFling(velocityY: Float) {
+        val emu = session?.emulator ?: return
+        val maxOffset: Int
+        val startOffset: Int
+        synchronized(emu) {
+            val rows = visibleRowCount(emu.buffer)
+            viewport.synchronize(emu.buffer, rows)
+            maxOffset = viewport.maxScrollOffset(emu.buffer, rows)
+            startOffset = viewport.scrollOffsetFromBottom
+        }
+        if (maxOffset <= 0 || metrics.charHeight <= 0f) return
+        // OverScroller coordinates are rows here, while GestureDetector reports
+        // pixels per second; convert units to avoid extremely fast terminal flings.
+        val velocityRowsPerSecond = (velocityY / metrics.charHeight).toInt()
+        scroller.fling(0, startOffset, 0, -velocityRowsPerSecond, 0, 0, 0, maxOffset)
+        postInvalidateOnAnimation()
+    }
+
+    private fun selectedText(): String? {
+        val selected = selection ?: return null
+        val emu = session?.emulator ?: return null
+        return synchronized(emu) { selected.copyText(emu.buffer) }
+    }
+
+    private fun copySelectionToClipboard() {
+        val text = selectedText() ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText("noxs-selection", text))
+    }
+
+    private fun showMoreSelectionMenu() {
+        val popup = PopupMenu(context, this)
+        popup.menu.add(0, MORE_SELECT_ALL, 0, "Select all output")
+        popup.menu.add(0, MORE_COPY_ALL, 1, "Copy all output")
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                MORE_SELECT_ALL -> {
+                    val emu = session?.emulator
+                    if (emu != null) {
+                        val all = synchronized(emu) { emu.buffer.selectAllText() }
+                        if (all != null) {
+                            selection = all
+                            actionMode?.invalidateContentRect()
+                            invalidate()
+                        }
+                    }
+                    true
+                }
+                MORE_COPY_ALL -> {
+                    val text = session?.emulator?.transcriptText()?.replace("█", "").orEmpty()
+                    clipboard.setPrimaryClip(ClipData.newPlainText("noxs-terminal", text))
+                    actionMode?.finish()
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
+    }
+
+    private fun notifyScrollState() {
+        val emu = session?.emulator
+        val atBottom = if (emu == null) true else synchronized(emu) {
+            viewport.synchronize(emu.buffer, visibleRowCount(emu.buffer))
+            viewport.scrollOffsetFromBottom == 0
+        }
+        onScrollStateChanged?.invoke(atBottom)
+    }
+
+    /** Called by the PTY session's coalesced main-thread output notification. */
+    fun onSessionOutputChanged(changedSession: TerminalSession) {
+        if (session !== changedSession) return
+        val emu = changedSession.emulator
+        synchronized(emu) {
+            viewport.synchronize(emu.buffer, visibleRowCount(emu.buffer))
+            if (selection != null && emu.buffer.resolveSelection(selection!!) == null) {
+                selection = null
+                actionMode?.finish()
+            }
+        }
+        if (!scroller.isFinished) scroller.abortAnimation()
+        notifyScrollState()
+        invalidate()
+    }
+
+    fun attach(newSession: TerminalSession) {
+        actionMode?.finish()
+        session = newSession
+        selection = null
+        selectionGesture = false
+        draggingEndpoint = null
+        touchScrollActive = false
+        gesturePolicy.finish()
+        scroller.abortAnimation()
+        stopEdgeAutoScroll()
+        scrollPixelRemainder = 0f
+        synchronized(newSession.emulator) {
+            viewport.attach(newSession.emulator.buffer, visibleRowCount(newSession.emulator.buffer))
+        }
+        updateSize()
+        notifyScrollState()
+        invalidate()
+    }
+
+    fun setFontSizeSp(sp: Float) {
+        renderer.fontSizeSp = sp
+        updateSize()
+        invalidate()
+    }
+
+    fun showSoftInput() {
+        requestFocus()
+        imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    fun pasteFromClipboard() {
+        val clip = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
+        session?.write(session?.emulator?.paste(clip) ?: return)
+    }
+
+    fun selectionOrTranscriptText(): String =
+        selectedText() ?: session?.emulator?.transcriptText()?.replace("█", "").orEmpty()
+
+    /** Explicitly returns the viewport to the live bottom without moving the PTY cursor. */
+    fun scrollToBottom() {
+        scroller.abortAnimation()
+        scrollPixelRemainder = 0f
+        val emu = session?.emulator
+        if (emu != null) synchronized(emu) {
+            viewport.scrollToBottom(emu.buffer, visibleRowCount(emu.buffer))
+        }
+        notifyScrollState()
+        invalidate()
+    }
+
+    fun sendBytes(data: ByteArray) {
+        if (ctrlLatch && data.size == 1) {
+            val ch = data[0].toInt() and 0xff
+            val ctrlByte = (ch and 0x1f).toByte()
+            session?.write(byteArrayOf(ctrlByte))
+            clearLatches()
+        } else if (altLatch && data.isNotEmpty()) {
+            session?.write(byteArrayOf(0x1b) + data)
+            clearLatches()
+        } else {
+            session?.write(data)
+        }
+    }
+
+    /** Send a terminal navigation key while honoring the extra-key modifier latches. */
+    fun sendSpecialKey(keyCode: Int) {
+        val emu = session?.emulator ?: return
+        val modifiers = (if (ctrlLatch) KeyHandler.MOD_CTRL else 0) or
+            (if (altLatch) KeyHandler.MOD_ALT else 0)
+        val sequence = KeyHandler.map(keyCode, modifiers, emu.appCursorKeys) ?: return
+        session?.write(sequence)
+        clearLatches()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        renderer.densityScale = resources.displayMetrics.scaledDensity
+        val emu = session?.emulator ?: run {
+            canvas.drawColor(0xff000000.toInt())
+            val pad = 16f * resources.displayMetrics.density
+            canvas.drawText("Starting Noxs terminal…", pad, pad * 2f, placeholderPaint)
+            return
+        }
+        // PTY output is parsed on a reader thread while Canvas rendering runs on
+        // the main thread. Use the emulator monitor so both frame traversal and
+        // cursor drawing see one consistent screen after writes/resizes.
+        synchronized(emu) {
+            val rows = visibleRowCount(emu.buffer)
+            viewport.synchronize(emu.buffer, rows)
+            renderer.scrollOffset = viewport.scrollOffsetFromBottom
+            renderer.render(
+                canvas,
+                emu,
+                metrics,
+                viewport.scrollOffsetFromBottom,
+                isFocusedVisual,
+                resources.displayMetrics.density,
+                selection
+            )
+            if (viewport.scrollOffsetFromBottom == 0 && (cursorBlinkOn || !hasFocus())) {
+                renderer.drawCursor(canvas, emu, metrics)
+            }
+        }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val handle = handleAt(event.x, event.y)
+                gesturePolicy.onDown(onSelectionHandle = handle != null)
+                touchDownX = event.x
+                touchDownY = event.y
+                lastTouchY = event.y
+                touchScrollActive = false
+                if (handle != null) {
+                    scroller.abortAnimation()
+                    draggingEndpoint = handle
+                    selectionGesture = false
+                    updatePointer(event.x, event.y)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    updateEdgeAutoScroll()
+                    return true
+                }
+                if (selection != null) {
+                    actionMode?.finish()
+                    selection = null
+                    selectionGesture = false
+                    invalidate()
+                }
+                draggingEndpoint = null
+                stopEdgeAutoScroll()
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return gestureDetector.onTouchEvent(event)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (draggingEndpoint != null) {
+                    updatePointer(event.x, event.y)
+                    updateSelectionFromPointer(pointerX, pointerY)
+                    updateEdgeAutoScroll()
+                    return true
+                }
+            }
+        }
+
+        val handled = gestureDetector.onTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_MOVE && !selectionGesture &&
+            draggingEndpoint == null && gesturePolicy.owner == TerminalGesturePolicy.Owner.SCROLL_OR_TAP) {
+            val deltaX = event.x - touchDownX
+            val deltaY = event.y - touchDownY
+            if (!touchScrollActive && gesturePolicy.shouldStartVerticalScroll(deltaX, deltaY, touchSlop)) {
+                touchScrollActive = true
+                scrollPixelRemainder = 0f
+                scroller.abortAnimation()
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            if (touchScrollActive) {
+                scrollByPixels(gesturePolicy.verticalScrollDelta(lastTouchY, event.y))
+            }
+            lastTouchY = event.y
+        }
+        if (selectionGesture) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    updatePointer(event.x, event.y)
+                    updateSelectionFromPointer(pointerX, pointerY)
+                    updateEdgeAutoScroll()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    selectionGesture = false
+                    touchScrollActive = false
+                    gesturePolicy.finish()
+                    stopEdgeAutoScroll()
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return true
+        }
+        if (draggingEndpoint != null) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    draggingEndpoint = null
+                    touchScrollActive = false
+                    gesturePolicy.finish()
+                    stopEdgeAutoScroll()
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return true
+        }
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            touchScrollActive = false
+            gesturePolicy.finish()
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return handled
+    }
+
+    override fun computeScroll() {
+        super.computeScroll()
+        if (!scroller.computeScrollOffset()) return
+        val emu = session?.emulator
+        if (emu != null) synchronized(emu) {
+            viewport.setOffsetFromBottom(scroller.currY, emu.buffer, visibleRowCount(emu.buffer))
+        }
+        notifyScrollState()
+        postInvalidateOnAnimation()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        updateSize()
+    }
+
+    override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: android.graphics.Rect?) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+        isFocusedVisual = gainFocus
+        cursorBlinkOn = true
+        removeCallbacks(cursorBlinkRunnable)
+        if (gainFocus && isAttachedToWindow) postDelayed(cursorBlinkRunnable, CURSOR_BLINK_MS)
+        invalidate()
+    }
+
+    private fun updateSize() {
+        renderer.densityScale = resources.displayMetrics.scaledDensity
+        val m = renderer.measure().also { metrics = it }
+        val w = width.takeIf { it > 0 } ?: 720
+        val h = height.takeIf { it > 0 } ?: 1200
+        val cols = (w / m.charWidth).toInt().coerceAtLeast(4)
+        val rows = (h / m.charHeight).toInt().coerceAtLeast(2)
+        session?.resize(rows, cols)
+        val emu = session?.emulator
+        if (emu != null) synchronized(emu) {
+            viewport.synchronize(emu.buffer, visibleRowCount(emu.buffer))
+            if (selection != null && emu.buffer.resolveSelection(selection!!) == null) {
+                selection = null
+                actionMode?.finish()
+            }
+        }
+        scroller.abortAnimation()
+        onSessionResized?.invoke(rows, cols)
+        notifyScrollState()
+        invalidate()
+    }
+
+    override fun checkInputConnectionProxy(view: android.view.View): Boolean = true
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
+        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT or
+            EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+            EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or
+            EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            EditorInfo.IME_ACTION_NONE
+        return object : BaseInputConnection(this, false) {
+            override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
+                composingText = ""
+                val committed = text.toString().replace("\r\n", "\r").replace("\n", "\r")
+                if (committed.isNotEmpty()) sendBytes(committed.toByteArray(Charsets.UTF_8))
+                return true
+            }
+
+            override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
+                // Keep IME composition local until it commits; sending every
+                // composing update duplicates characters in predictive keyboards.
+                composingText = text.toString()
+                return true
+            }
+
+            override fun finishComposingText(): Boolean {
+                composingText = ""
+                return true
+            }
+
+            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                if (composingText.isNotEmpty()) {
+                    composingText = when {
+                        beforeLength > 0 -> composingText.dropLast(beforeLength.coerceAtMost(composingText.length))
+                        afterLength > 0 -> composingText.drop(afterLength.coerceAtMost(composingText.length))
+                        else -> composingText
+                    }
+                    return true
+                }
+                if (beforeLength > 0) repeat(beforeLength) { sendBytes(byteArrayOf(0x7f)) }
+                else if (afterLength > 0) repeat(afterLength) { sendBytes("\u001b[3~".toByteArray()) }
+                return true
+            }
+
+            override fun performEditorAction(actionCode: Int): Boolean {
+                sendBytes(byteArrayOf('\r'.code.toByte()))
+                return true
+            }
+
+            override fun sendKeyEvent(event: KeyEvent): Boolean {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    onKeyDown(event.keyCode, event)
+                    return true
+                }
+                return super.sendKeyEvent(event)
+            }
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val emu = session?.emulator ?: return super.onKeyDown(keyCode, event)
+        if (handleVolumeKeys(keyCode)) return true
+
+        val meta = event.metaState
+        val ctrl = ctrlLatch || (meta and KeyEvent.META_CTRL_ON) != 0
+        val alt = altLatch || (meta and KeyEvent.META_ALT_ON) != 0
+        val shift = (meta and KeyEvent.META_SHIFT_ON) != 0
+        val mods = (if (ctrl) KeyHandler.MOD_CTRL else 0) or
+            (if (alt) KeyHandler.MOD_ALT else 0) or
+            (if (shift) KeyHandler.MOD_SHIFT else 0)
+
+        // Ctrl+V paste (also Ctrl+Shift+V)
+        if (ctrl && keyCode == KeyEvent.KEYCODE_V) {
+            pasteFromClipboard()
+            clearLatches()
+            return true
+        }
+
+        // Arrow with modifiers → word jump
+        KeyHandler.modifiedArrow(keyCode, ctrl, shift, emu.appCursorKeys)?.let {
+            session?.write(it)
+            clearLatches()
+            return true
+        }
+
+        KeyHandler.map(keyCode, mods, emu.appCursorKeys)?.let {
+            session?.write(it)
+            clearLatches()
+            return true
+        }
+
+        val chr = event.getUnicodeChar(meta)
+        if (chr != 0) {
+            if (ctrl) {
+                // Control codes for punctuation (Ctrl+[ = ESC, Ctrl+Space = NUL…)
+                session?.write(byteArrayOf((chr and 0x1f).toByte()))
+            } else {
+                session?.write(String(Character.toChars(chr)).toByteArray(Charsets.UTF_8))
+            }
+            clearLatches()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private fun handleVolumeKeys(keyCode: Int): Boolean {
+        if (!volumeKeysEnabled) return false
+        val emu = session?.emulator ?: return false
+        val dir = when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> 'A'
+            KeyEvent.KEYCODE_VOLUME_DOWN -> 'B'
+            else -> return false
+        }
+        session?.write(if (emu.appCursorKeys) "\u001bO$dir".toByteArray() else "\u001b[$dir".toByteArray())
+        return true
+    }
+
+    var volumeKeysEnabled: Boolean = false
+
+    private fun clearLatches() {
+        if (ctrlLatch || altLatch) {
+            ctrlLatch = false
+            altLatch = false
+            (parent?.parent as? android.view.ViewGroup)?.findViewById<NoxsExtraKeysBar>(R.id.extra_keys)?.refreshLatches()
+            (parent as? android.view.ViewGroup)?.findViewById<NoxsExtraKeysBar>(R.id.extra_keys)?.refreshLatches()
+            invalidate()
+        }
+    }
+
+    override fun onCheckIsTextEditor(): Boolean = true
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        renderer.densityScale = resources.displayMetrics.scaledDensity
+        metrics = renderer.measure()
+        if (hasFocus()) postDelayed(cursorBlinkRunnable, CURSOR_BLINK_MS)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(cursorBlinkRunnable)
+        stopEdgeAutoScroll()
+        scroller.abortAnimation()
+        actionMode?.finish()
+        super.onDetachedFromWindow()
+    }
+
+    private companion object {
+        const val CURSOR_BLINK_MS = 550L
+        const val ACTION_COPY = 101
+        const val ACTION_PASTE = 102
+        const val ACTION_MORE = 103
+        const val MORE_SELECT_ALL = 201
+        const val MORE_COPY_ALL = 202
+        const val HANDLE_HIT_RADIUS_DP = 28f
+    }
+}

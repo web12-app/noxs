@@ -1,7 +1,7 @@
 # sandbox/
 
 The Noxs isolation architecture. The Kotlin implementation lives in
-`noxs-shared` and `app/src/main/java/com/noxs/linux/runtime` (mapping below);
+`noxs-shared` and `app/src/main/java/com/crossberry/noxs/runtime` (mapping below);
 this directory documents the model and holds provisioning references.
 
 ```

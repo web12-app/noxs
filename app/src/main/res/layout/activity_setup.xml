@@ -1,150 +1,186 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp"
-    android:background="@color/noxs_background">
+    android:background="@color/noxs_background"
+    android:fillViewport="true"
+    android:overScrollMode="ifContentScrolls">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/title_setup"
-        style="@style/Text.Noxs.Title" />
-
-    <!-- Password block (shown first) -->
     <LinearLayout
-        android:id="@+id/password_block"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:layout_marginTop="16dp">
+        android:paddingStart="24dp"
+        android:paddingTop="32dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="32dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/setup_password_title"
-            style="@style/Text.Noxs.Body" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/setup_password_hint"
-            android:layout_marginTop="8dp">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_password"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textPassword" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/setup_password2_hint">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_password2"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textPassword" />
-        </com.google.android.material.textfield.TextInputLayout>
-    </LinearLayout>
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_start"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="@string/setup_start" />
-
-    <!-- Progress block -->
-    <LinearLayout
-        android:id="@+id/progress_block"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginTop="24dp"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tv_step"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            style="@style/Text.Noxs.Mono"
-            android:text="@string/setup_step_arch" />
-
-        <com.google.android.material.progressindicator.LinearProgressIndicator
-            android:id="@+id/progress"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:indeterminate="true" />
-
-        <TextView
-            android:id="@+id/tv_bytes"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            style="@style/Text.Noxs.Mono"
-            android:text="" />
-
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="12dp"
-            android:background="@color/noxs_surface">
-
-            <TextView
-                android:id="@+id/tv_log"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:padding="8dp"
-                style="@style/Text.Noxs.Mono" />
-        </ScrollView>
-    </LinearLayout>
-
-    <!-- Done block -->
-    <LinearLayout
-        android:id="@+id/done_block"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginTop="24dp"
-        android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/setup_done"
+            android:text="@string/title_setup"
+            android:textSize="32sp"
             style="@style/Text.Noxs.Title" />
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/setup_done_msg"
+            android:layout_marginTop="8dp"
+            android:text="@string/setup_subtitle"
+            android:textSize="17sp"
             style="@style/Text.Noxs.Body" />
 
-        <TextView
-            android:id="@+id/tv_sha"
+        <LinearLayout
+            android:id="@+id/password_block"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            style="@style/Text.Noxs.Mono" />
+            android:layout_marginTop="28dp"
+            android:orientation="vertical">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/setup_sha_unpinned"
-            style="@style/Text.Noxs.Body" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:text="@string/setup_password_title"
+                android:textSize="15sp"
+                style="@style/Text.Noxs.Body" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_open_terminal"
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/password_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/setup_password_hint"
+                app:boxBackgroundMode="outline"
+                app:endIconMode="password_toggle"
+                app:endIconTint="@color/noxs_text">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_password"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:importantForAutofill="no"
+                    android:imeOptions="actionNext"
+                    android:inputType="textPassword|textNoSuggestions"
+                    android:maxLines="1"
+                    android:saveEnabled="false" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/password_confirm_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="@string/setup_password2_hint"
+                app:boxBackgroundMode="outline"
+                app:endIconMode="password_toggle"
+                app:endIconTint="@color/noxs_text">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_password2"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:importantForAutofill="no"
+                    android:imeOptions="actionDone"
+                    android:inputType="textPassword|textNoSuggestions"
+                    android:maxLines="1"
+                    android:saveEnabled="false" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_start"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="22dp"
+                android:text="@string/setup_start"
+                android:textAllCaps="false"
+                app:cornerRadius="18dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/progress_block"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/setup_open_terminal" />
+            android:layout_marginTop="28dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/setup_progress_title"
+                android:textSize="17sp"
+                style="@style/Text.Noxs.Title" />
+
+            <TextView
+                android:id="@+id/tv_step"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="@string/setup_subtitle"
+                android:textSize="14sp"
+                style="@style/Text.Noxs.Body" />
+
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/progress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:indeterminate="true"
+                app:indicatorColor="@color/noxs_primary"
+                app:trackColor="@color/noxs_surface_alt" />
+
+            <ScrollView
+                android:id="@+id/setup_log_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="176dp"
+                android:layout_marginTop="16dp"
+                android:background="@color/noxs_surface"
+                android:fillViewport="true"
+                android:padding="14dp">
+
+                <TextView
+                    android:id="@+id/tv_log"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/setup_progress_title"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="13sp" />
+            </ScrollView>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/done_block"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/setup_done"
+                android:textSize="24sp"
+                style="@style/Text.Noxs.Title" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/setup_done_msg"
+                style="@style/Text.Noxs.Body" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_open_terminal"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="22dp"
+                android:text="@string/setup_open_terminal"
+                android:textAllCaps="false"
+                app:cornerRadius="18dp" />
+        </LinearLayout>
     </LinearLayout>
-</LinearLayout>
+</ScrollView>

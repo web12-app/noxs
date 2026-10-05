@@ -2,11 +2,12 @@
 # noxs — Noxs CLI for the Debian userspace (original implementation)
 # Usage:
 #   noxs help
+#   noxs info
 #   noxs code install|start|stop|restart|status
+#   noxs storage [status|setup|map|repair|reset|ls|mkdir|cat|get|put|rm|cp|mv]
 #   noxs-service start|stop|restart|status [service]
 #   noxs-socket list|test <path>
 #   noxs-ps
-#   noxs info
 
 set -u
 NOXS_RUN_DIR="/var/run/noxs"
@@ -15,6 +16,8 @@ CODE_DATA="$HOME/.noxs/code"
 CODE_WORKSPACE="$HOME"
 CODE_ADDR="127.0.0.1:8080"      # local-only by default, never exposed
 CODE_PID="$NOXS_RUN_DIR/code-server.pid"
+NOXS_STORAGE_HOST="/var/run/noxs/host/storage"
+NOXS_STORAGE_LAST_ID=""
 
 msg()  { printf 'noxs: %s\n' "$*"; }
 err()  { printf 'noxs: %s\n' "$*" >&2; }
@@ -97,14 +100,210 @@ code_status() {
     fi
 }
 
+# -------------------------------------------------------- noxs SAF storage
+
+storage_cleanup() {
+    local id="$1"
+    rm -f "$NOXS_STORAGE_HOST/requests/$id" \
+        "$NOXS_STORAGE_HOST/responses/$id" \
+        "$NOXS_STORAGE_HOST/payloads/$id" \
+        "$NOXS_STORAGE_HOST/response-payloads/$id"
+}
+
+storage_request() {
+    local operation="$1" category="${2:-}" path="${3:-}" argument="${4:-}"
+    local payload_source="${5:-}" payload_text="${6:-}"
+    local id request response first attempt
+    NOXS_STORAGE_LAST_ID=""
+    if [ ! -d "$NOXS_STORAGE_HOST/requests" ]; then
+        err "Noxs storage bridge is unavailable; open the Noxs terminal and retry"
+        return 1
+    fi
+    id="$$-$(date +%s)-$RANDOM-$RANDOM"
+    request="$NOXS_STORAGE_HOST/requests/$id"
+    response="$NOXS_STORAGE_HOST/responses/$id"
+    storage_cleanup "$id"
+    if [ -n "$payload_source" ]; then
+        if [ ! -f "$payload_source" ]; then
+            err "local upload file not found: $payload_source"
+            return 1
+        fi
+        if ! cp -- "$payload_source" "$NOXS_STORAGE_HOST/payloads/$id"; then
+            storage_cleanup "$id"
+            err "could not stage upload file"
+            return 1
+        fi
+    elif [ "$operation" = "write" ]; then
+        if ! printf '%s' "$payload_text" > "$NOXS_STORAGE_HOST/payloads/$id"; then
+            storage_cleanup "$id"
+            err "could not stage text payload"
+            return 1
+        fi
+    fi
+    printf '%s\n%s\n%s\n%s\n' "$operation" "$category" "$path" "$argument" > "$request" || {
+        storage_cleanup "$id"
+        err "could not send storage request"
+        return 1
+    }
+    attempt=0
+    while [ ! -f "$response" ] && [ "$attempt" -lt 240 ]; do
+        sleep 0.5
+        attempt=$((attempt + 1))
+    done
+    if [ ! -f "$response" ]; then
+        storage_cleanup "$id"
+        err "Noxs Android storage service did not respond; keep Noxs open and retry"
+        return 1
+    fi
+    first="$(sed -n '1p' "$response" 2>/dev/null || true)"
+    if [ "$first" = "OK" ]; then
+        NOXS_STORAGE_LAST_ID="$id"
+        tail -n +2 "$response"
+        return 0
+    fi
+    tail -n +2 "$response" >&2
+    storage_cleanup "$id"
+    return 1
+}
+
+storage_usage() {
+    cat <<'HELP'
+Usage: noxs storage [command]
+  status                         Show current user-granted folder access
+  setup                          Choose a shared folder with Android's picker
+  map <category>                 Choose a folder for a category
+  repair                         Re-check persisted permissions and mappings
+  reset                          Release Noxs mappings only (never deletes files)
+  ls <category> [relative-path]  List documents inside a selected folder
+  mkdir <category> <path>        Create a folder through the SAF provider
+  cat <category> <path>          Read a document to the terminal
+  get <category> <path> <local>  Copy a document into the Noxs Linux sandbox
+  put <category> <path> <local>  Copy a sandbox file into the selected folder
+  rm <category> <path>           Delete the selected document via Android's provider
+  cp <category> <src> <dest>     Copy within one selected folder tree
+  mv <category> <src> <dest>     Move within one selected folder tree
+
+Categories: shared, downloads, dcim, pictures, music, movies
+SAF access is command-based. It is not a POSIX mount; ordinary paths,
+Bash redirection, and arbitrary Linux applications cannot access these folders.
+HELP
+}
+
+storage_command() {
+    local action="${1:-status}" category path destination local_file
+    if [ "$#" -gt 0 ]; then shift; fi
+    case "$action" in
+        help|--help|-h) storage_usage ;;
+        ""|status)
+            storage_request status
+            ;;
+        setup)
+            storage_request setup shared
+            ;;
+        map)
+            category="${1:-}"
+            if [ -z "$category" ]; then err "usage: noxs storage map <category>"; return 2; fi
+            storage_request map "$category"
+            ;;
+        repair)
+            storage_request repair
+            ;;
+        reset)
+            storage_request reset
+            ;;
+        ls|list)
+            category="${1:-}"; path="${2:-}"
+            if [ -z "$category" ]; then err "usage: noxs storage ls <category> [relative-path]"; return 2; fi
+            storage_request list "$category" "$path"
+            ;;
+        mkdir)
+            category="${1:-}"; path="${2:-}"
+            if [ -z "$category" ] || [ -z "$path" ]; then err "usage: noxs storage mkdir <category> <path>"; return 2; fi
+            storage_request mkdir "$category" "$path"
+            ;;
+        cat)
+            category="${1:-}"; path="${2:-}"
+            if [ -z "$category" ] || [ -z "$path" ]; then err "usage: noxs storage cat <category> <path>"; return 2; fi
+            if storage_request read "$category" "$path" >/dev/null; then
+                local rc
+                cat "$NOXS_STORAGE_HOST/response-payloads/$NOXS_STORAGE_LAST_ID"
+                rc=$?
+                storage_cleanup "$NOXS_STORAGE_LAST_ID"
+                return "$rc"
+            fi
+            return 1
+            ;;
+        get)
+            category="${1:-}"; path="${2:-}"; local_file="${3:-}"
+            if [ -z "$category" ] || [ -z "$path" ] || [ -z "$local_file" ]; then
+                err "usage: noxs storage get <category> <path> <local-file>"; return 2
+            fi
+            if storage_request get "$category" "$path" >/dev/null; then
+                if cp -- "$NOXS_STORAGE_HOST/response-payloads/$NOXS_STORAGE_LAST_ID" "$local_file"; then
+                    storage_cleanup "$NOXS_STORAGE_LAST_ID"
+                    msg "downloaded to the Noxs Linux sandbox"
+                else
+                    storage_cleanup "$NOXS_STORAGE_LAST_ID"
+                    return 1
+                fi
+            else return 1; fi
+            ;;
+        put)
+            category="${1:-}"; path="${2:-}"; local_file="${3:-}"
+            if [ -z "$category" ] || [ -z "$path" ] || [ -z "$local_file" ]; then
+                err "usage: noxs storage put <category> <path> <local-file>"; return 2
+            fi
+            if storage_request put "$category" "$path" "" "$local_file"; then
+                storage_cleanup "$NOXS_STORAGE_LAST_ID"
+            else return 1; fi
+            ;;
+        write)
+            category="${1:-}"; path="${2:-}"
+            if [ -z "$category" ] || [ -z "$path" ]; then
+                err "usage: noxs storage write <category> <path> <text>"; return 2
+            fi
+            shift 2
+            if ! storage_request write "$category" "$path" "" "" "$*"; then return 1; fi
+            storage_cleanup "$NOXS_STORAGE_LAST_ID"
+            ;;
+        rm|delete)
+            category="${1:-}"; path="${2:-}"
+            if [ -z "$category" ] || [ -z "$path" ]; then err "usage: noxs storage rm <category> <path>"; return 2; fi
+            storage_request delete "$category" "$path"
+            ;;
+        cp|copy|mv|move)
+            category="${1:-}"; path="${2:-}"; destination="${3:-}"
+            if [ -z "$category" ] || [ -z "$path" ] || [ -z "$destination" ]; then
+                err "usage: noxs storage $action <category> <source> <destination>"; return 2
+            fi
+            if [ "$action" = "cp" ] || [ "$action" = "copy" ]; then
+                storage_request copy "$category" "$path" "$destination"
+            else
+                storage_request move "$category" "$path" "$destination"
+            fi
+            ;;
+        *)
+            err "unknown storage command: $action"
+            storage_usage >&2
+            return 2
+            ;;
+    esac
+}
+
 # ---------------------------------------------------------------- noxs info
 
 do_info() {
-    echo "Noxs Debian userspace"
-    echo "  user:    $(id -un) (uid $(id -u))"
-    echo "  kernel:  $(uname -sr)"
-    echo "  run dir: $NOXS_RUN_DIR"
-    echo "  sudo:    sandbox-only privilege (manages Noxs, not Android)"
+    local debian_version
+    debian_version="$(head -1 /etc/debian_version 2>/dev/null || echo unknown)"
+    echo "Noxs — Debian 12 (bookworm) userspace"
+    echo "  Debian:      $debian_version"
+    echo "  environment: proot (Android device root is not available)"
+    echo "  session:     ${NOXS_SESSION_LABEL:-terminal}"
+    echo "  account:     $(id -un) (uid $(id -u))"
+    echo "  shell:       ${SHELL:-/bin/bash}"
+    echo "  architecture: $(uname -m 2>/dev/null || echo unknown)"
+    echo "  storage:     SAF document commands; no POSIX mount"
+    echo "  sudo:        Noxs sandbox only"
     noxs-socket list 2>/dev/null | head -5 || true
 }
 
@@ -119,9 +318,13 @@ case "${1:-help}" in
             *) err "usage: noxs code install|start|stop|restart|status"; exit 2 ;;
         esac
         ;;
+    storage)
+        shift
+        storage_command "$@"
+        ;;
     info) do_info ;;
     help|--help|-h)
-        sed -n '2,10p' "$0"
+        sed -n '2,18p' "$0"
         ;;
     *)
         # Forward legacy aliases so 'noxs-service start ssh' works as 'noxs service'

@@ -1,7 +1,7 @@
 # NOTICE
 
 Product: Noxs — Debian-optimized Linux userspace environment for Android
-Application ID: com.noxs.linux
+Application ID: com.crossberry.noxs
 License: Apache-2.0 (see LICENSE)
 
 Noxs is an original implementation. It contains no source code, branding, or

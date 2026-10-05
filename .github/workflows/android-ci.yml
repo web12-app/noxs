@@ -55,6 +55,11 @@ jobs:
       - name: Build + unit tests
         run: ./gradlew assembleDebug assembleRelease testDebugUnitTest :terminal-emulator:test --stacktrace
 
+      - name: Verify debug APK application ID
+        run: |
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk \
+            | grep -F "package: name='com.crossberry.noxs'" >/dev/null
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -115,6 +120,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve release version from tag
+        id: release_version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a semantic version tag such as v0.1.8; got $TAG" >&2
+            exit 1
+          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MAJOR=$((10#$MAJOR))
+          MINOR=$((10#$MINOR))
+          PATCH=$((10#$PATCH))
+          VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))
+          if (( VERSION_CODE < 1 || VERSION_CODE > 2147483647 )); then
+            echo "Tag maps outside the valid Android versionCode range: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION (versionCode=$VERSION_CODE)"
+
       - name: JDK 17
         uses: actions/setup-java@v4
         with:
@@ -150,24 +178,37 @@ jobs:
             echo "NOXS_KEYSTORE_FILE=" >> "$GITHUB_ENV"
           fi
 
-      - name: Build signed release
+      - name: Build tagged release APK
         env:
           NOXS_KEYSTORE_PASSWORD: ${{ secrets.NOXS_KEYSTORE_PASSWORD }}
           NOXS_KEY_ALIAS: ${{ secrets.NOXS_KEY_ALIAS }}
           NOXS_KEY_PASSWORD: ${{ secrets.NOXS_KEY_PASSWORD }}
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          RELEASE_VERSION_CODE: ${{ steps.release_version.outputs.code }}
         run: |
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease --stacktrace \
+            -PnoxsVersionName="$RELEASE_VERSION" \
+            -PnoxsVersionCode="$RELEASE_VERSION_CODE"
+
+      - name: Verify package ID and stage versioned APK
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          AAPT="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.crossberry.noxs'" >/dev/null
+          mkdir -p release-assets
+          cp "$APK" "release-assets/noxs-${RELEASE_VERSION}.apk"
 
       - name: Upload release APK artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: noxs-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          name: noxs-${{ steps.release_version.outputs.version }}
+          path: release-assets/noxs-${{ steps.release_version.outputs.version }}.apk
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.apk
+          files: release-assets/noxs-${{ steps.release_version.outputs.version }}.apk
           generate_release_notes: true

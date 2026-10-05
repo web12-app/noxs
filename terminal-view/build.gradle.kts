@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.noxs.linux.terminal.view"
+    namespace = "com.crossberry.noxs.terminal.view"
     compileSdk = 34
 
     defaultConfig {

@@ -1,0 +1,703 @@
+/*
+ * Noxs — original implementation.
+ * Main terminal screen: multiple sessions (tabs + drawer), visible action bar,
+ * direct Android IME-to-PTY input, terminal canvas, extra keys, and live status.
+ */
+package com.crossberry.noxs.ui
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
+import android.os.FileObserver
+import android.view.Gravity
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GravityCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.crossberry.noxs.R
+import com.crossberry.noxs.databinding.ActivityTerminalBinding
+import com.crossberry.noxs.runtime.NoxsAptBootstrapper
+import com.crossberry.noxs.runtime.NoxsPaths
+import com.crossberry.noxs.runtime.NoxsResources
+import com.crossberry.noxs.runtime.NoxsRuntimeFactory
+import com.crossberry.noxs.runtime.NoxsService
+import com.crossberry.noxs.runtime.NoxsSessionManager
+import com.crossberry.noxs.runtime.NoxsStorageBridge
+import com.crossberry.noxs.runtime.RootfsConfigurator
+import com.crossberry.noxs.runtime.RuntimeHolder
+import com.crossberry.noxs.terminal.emulator.TerminalSession
+import com.crossberry.noxs.terminal.emulator.TerminalSessionClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
+
+    private lateinit var binding: ActivityTerminalBinding
+    private lateinit var paths: NoxsPaths
+    private var resources: NoxsResources? = null
+    private var sessionManager: NoxsSessionManager? = null
+    private lateinit var storageBridge: NoxsStorageBridge
+    private lateinit var storagePickerLauncher: ActivityResultLauncher<Intent>
+    private var storageObserver: FileObserver? = null
+    private var storageObservedPath: String? = null
+    private var pendingStorageAction: PendingStorageAction? = null
+
+    private data class PendingStorageAction(
+        val requestId: String,
+        val category: NoxsStorageBridge.Category
+    )
+
+    private var current: NoxsSessionManager.Entry? = null
+    private var aptInitializationStarted = false
+    private var aptInitializationComplete = false
+    private var aptInitializationError: String? = null
+    private var pendingRootSession = false
+
+    // Nullable (not lateinit): adoptRuntimeNow() collects the sessions StateFlow,
+    // which can emit synchronously during onCreate before/around adapter binding.
+    private var sessionAdapter: TwoLineAdapter? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        storagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            onStoragePickerResult(result)
+        }
+        binding = ActivityTerminalBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        val app = application as com.crossberry.noxs.NoxsApplication
+        paths = app.paths
+        storageBridge = NoxsStorageBridge(this, paths)
+        val savedStorageRequest = savedInstanceState?.getString(STATE_STORAGE_REQUEST_ID)
+        val savedStorageCategory = savedInstanceState?.getString(STATE_STORAGE_CATEGORY)?.let { NoxsStorageBridge.Category.fromKey(it) }
+        if (savedStorageRequest != null && savedStorageCategory != null) {
+            pendingStorageAction = PendingStorageAction(savedStorageRequest, savedStorageCategory)
+        }
+
+        if (!paths.isInstalled()) {
+            startActivity(Intent(this, SetupActivity::class.java))
+            finish()
+            return
+        }
+
+        // Bind the session list adapter BEFORE adopting the runtime
+        sessionAdapter = TwoLineAdapter.bind(binding.sessionList, emptyList())
+
+        NoxsService.start(this)
+        adoptRuntime()
+
+        // Top bar: Drawer menu button
+        binding.btnDrawer.setOnClickListener {
+            if (binding.drawer.isDrawerOpen(GravityCompat.START)) {
+                binding.drawer.closeDrawer(GravityCompat.START)
+            } else {
+                binding.drawer.openDrawer(GravityCompat.START)
+            }
+        }
+
+        // Drawer: sessions
+        binding.btnNewSession.setOnClickListener { newSession(root = false) }
+        binding.btnNewRoot.setOnClickListener { newSession(root = true) }
+
+        // Visible Action Bar buttons
+        binding.btnActionNewShell.setOnClickListener { newSession(root = false) }
+        binding.btnActionNewRoot.setOnClickListener { newSession(root = true) }
+        binding.btnActionCopy.setOnClickListener { copyTerminalText() }
+        binding.btnActionPaste.setOnClickListener { pasteIntoShell() }
+        binding.btnActionClear.setOnClickListener { clearTerminal() }
+        binding.btnActionPackages.setOnClickListener { startActivity(Intent(this, PackageManagerActivity::class.java)) }
+        binding.btnActionFiles.setOnClickListener { startActivity(Intent(this, FileBrowserActivity::class.java)) }
+        binding.btnActionServices.setOnClickListener { startActivity(Intent(this, ServiceManagerActivity::class.java)) }
+        binding.btnActionProcesses.setOnClickListener { startActivity(Intent(this, ProcessManagerActivity::class.java)) }
+        binding.btnActionSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        binding.btnActionDiagnostics.setOnClickListener { startActivity(Intent(this, DiagnosticsActivity::class.java)) }
+
+        // Drawer: managers
+        val routes = mapOf(
+            binding.navFiles to FileBrowserActivity::class.java,
+            binding.navPackages to PackageManagerActivity::class.java,
+            binding.navUsers to UserManagerActivity::class.java,
+            binding.navProcesses to ProcessManagerActivity::class.java,
+            binding.navServices to ServiceManagerActivity::class.java,
+            binding.navEnv to EnvVarsActivity::class.java,
+            binding.navStorage to StorageActivity::class.java,
+            binding.navSecurity to SecurityActivity::class.java,
+            binding.navSettings to SettingsActivity::class.java,
+            binding.navDiagnostics to DiagnosticsActivity::class.java,
+            binding.navAbout to AboutActivity::class.java
+        )
+        routes.forEach { (view, activity) ->
+            view.setOnClickListener {
+                binding.drawer.closeDrawer(GravityCompat.START)
+                startActivity(Intent(this, activity))
+            }
+        }
+
+        // Terminal view config + extra keys wiring
+        binding.terminal.volumeKeysEnabled = true
+        binding.terminal.onTerminalLinkClick = ::openTerminalLink
+        binding.terminal.onScrollStateChanged = { atLiveBottom ->
+            binding.btnTerminalLatest.visibility = if (atLiveBottom) View.GONE else View.VISIBLE
+        }
+        binding.btnTerminalLatest.setOnClickListener { binding.terminal.scrollToBottom() }
+        binding.extraKeys.terminalView = binding.terminal
+
+        // Status widget ticker
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    refreshStatus()
+                    delay(5000)
+                }
+            }
+        }
+
+        val existing = RuntimeHolder.sessions?.sessions?.value
+        if (!existing.isNullOrEmpty()) {
+            current = existing.first()
+            attachCurrent()
+        } else {
+            autoCreatePending = true
+            fulfillAutoCreateIfReady()
+        }
+        startAptInitialization()
+    }
+
+    private var autoCreatePending = false
+
+    private fun fulfillAutoCreateIfReady() {
+        if (!autoCreatePending || !aptInitializationComplete) return
+        val mgr = sessionManager ?: RuntimeHolder.sessions ?: return
+        sessionManager = mgr
+        autoCreatePending = false
+        val list = mgr.sessions.value
+        if (list.isEmpty()) {
+            newSession(root = pendingRootSession)
+        } else if (current == null) {
+            current = list.first()
+            attachCurrent()
+        }
+    }
+
+    private fun startAptInitialization() {
+        if (aptInitializationStarted) return
+        aptInitializationStarted = true
+        binding.statusSession.text = "Preparing Debian packages"
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    RootfsConfigurator.ensureHealthyRootfs(paths)
+                    val resources = NoxsResources(paths)
+                    val launcher = NoxsRuntimeFactory.launcher(paths, resources)
+                    NoxsAptBootstrapper(paths, launcher).initialize()
+                }.getOrElse {
+                    NoxsAptBootstrapper.Result(false, it.message ?: it.javaClass.simpleName)
+                }
+            }
+            aptInitializationComplete = true
+            if (result.success) {
+                binding.statusSession.text = getString(R.string.title_terminal)
+            } else {
+                aptInitializationError = result.detail
+                Toast.makeText(
+                    this@TerminalActivity,
+                    "APT/TLS setup did not finish. Noxs will retry automatically next time. ${result.detail.take(180)}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            fulfillAutoCreateIfReady()
+        }
+    }
+
+    private fun adoptRuntime() {
+        if (RuntimeHolder.sessions == null) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                var tries = 0
+                while (RuntimeHolder.sessions == null && tries < 20) {
+                    delay(250); tries++
+                }
+                withContext(Dispatchers.Main) {
+                    adoptRuntimeNow()
+                }
+            }
+        } else {
+            adoptRuntimeNow()
+        }
+    }
+
+    private fun adoptRuntimeNow() {
+        sessionManager = RuntimeHolder.sessions
+        resources = NoxsResources(paths)
+        sessionManager?.client = this
+        lifecycleScope.launch {
+            sessionManager?.sessions?.collect { list ->
+                if (current == null && list.isNotEmpty()) {
+                    current = list.last()
+                    attachCurrent()
+                } else if (current != null) {
+                    val replacement = list.firstOrNull { it.label == current?.label && it.session !== current?.session }
+                    if (replacement != null) {
+                        current = replacement
+                        attachCurrent()
+                    }
+                }
+                renderSessions(list)
+            }
+        }
+        fulfillAutoCreateIfReady()
+    }
+
+    private fun newSession(root: Boolean) {
+        if (!aptInitializationComplete) {
+            autoCreatePending = true
+            pendingRootSession = root
+            Toast.makeText(this, "Preparing Debian package security before opening the shell…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val mgr = sessionManager ?: RuntimeHolder.sessions ?: run {
+            Toast.makeText(this, R.string.err_generic, Toast.LENGTH_SHORT).show()
+            return
+        }
+        sessionManager = mgr
+        val prefs = getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+        val showWelcome = !prefs.getBoolean(PREF_FIRST_SHELL_WELCOME_SHOWN, false)
+        mgr.createSession("", loginAsRoot = root, showFirstRunWelcome = showWelcome)
+            .onSuccess { entry ->
+                if (showWelcome) {
+                    prefs.edit().putBoolean(PREF_FIRST_SHELL_WELCOME_SHOWN, true).apply()
+                }
+                current = entry
+                attachCurrent()
+                binding.drawer.closeDrawer(GravityCompat.START)
+                aptInitializationError?.let { detail ->
+                    Toast.makeText(
+                        this,
+                        "APT remains unavailable; Noxs will retry on the next launch. ${detail.take(180)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            .onFailure {
+                Toast.makeText(this, it.message ?: getString(R.string.err_generic), Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun openTerminalLink(uri: String): Boolean {
+        val intent = when (uri) {
+            WEBSITE_URL -> Intent(Intent.ACTION_VIEW, Uri.parse(WEBSITE_URL))
+            SUPPORT_EMAIL -> Intent(Intent.ACTION_SENDTO, Uri.parse(SUPPORT_EMAIL))
+            else -> return false
+        }
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            Toast.makeText(this, "No compatible app is available to open this link.", Toast.LENGTH_SHORT).show()
+            true
+        }
+    }
+
+    private fun attachCurrent() {
+        val entry = current ?: return
+        binding.terminal.attach(entry.session)
+        binding.statusSession.text = entry.label + (if (entry.loginAsRoot) " ▸ ${getString(R.string.session_root_badge)}" else "")
+        binding.terminal.post {
+            binding.terminal.requestFocus()
+            binding.terminal.showSoftInput()
+        }
+    }
+
+    private fun copyTerminalText() {
+        val text = binding.terminal.selectionOrTranscriptText()
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("noxs-terminal", text))
+        Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun pasteIntoShell() {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: return
+        val session = current?.session ?: return
+        session.write(session.emulator.paste(clip))
+    }
+
+    private fun clearTerminal() {
+        val session = current?.session ?: return
+        session.emulator.clearScreen()
+        binding.terminal.onSessionOutputChanged(session)
+        session.write("clear\n".toByteArray(Charsets.UTF_8))
+        binding.terminal.invalidate()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (::storageBridge.isInitialized && paths.isInstalled()) startStorageObserver()
+    }
+
+    override fun onStop() {
+        storageObserver?.stopWatching()
+        storageObserver = null
+        storageObservedPath = null
+        super.onStop()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingStorageAction?.let { pending ->
+            outState.putString(STATE_STORAGE_REQUEST_ID, pending.requestId)
+            outState.putString(STATE_STORAGE_CATEGORY, pending.category.key)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun startStorageObserver() {
+        val recreated = runCatching { storageBridge.ensureControlDirectories() }.getOrElse {
+            Toast.makeText(this, "Unable to prepare Noxs storage commands", Toast.LENGTH_LONG).show()
+            return
+        }
+        cleanupStaleStorageTransfers()
+        armStorageObserver(force = recreated)
+        processPendingStorageRequests()
+    }
+
+    private fun armStorageObserver(force: Boolean) {
+        val path = paths.storageRequests.absolutePath
+        if (!force && storageObserver != null && storageObservedPath == path) return
+        storageObserver?.stopWatching()
+        storageObserver = null
+        storageObservedPath = null
+        val requestMask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+        val directoryInvalidatedMask = FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
+        val watchMask = requestMask or directoryInvalidatedMask
+        val observer = object : FileObserver(path, watchMask) {
+            override fun onEvent(event: Int, path: String?) {
+                if ((event and directoryInvalidatedMask) != 0) {
+                    runOnUiThread {
+                        storageObserver?.stopWatching()
+                        storageObserver = null
+                        storageObservedPath = null
+                        startStorageObserver()
+                    }
+                    return
+                }
+                if (path == null || (event and requestMask) == 0) return
+                runOnUiThread { processPendingStorageRequests() }
+            }
+        }
+        runCatching { observer.startWatching() }.onSuccess {
+            storageObserver = observer
+            storageObservedPath = path
+        }.onFailure {
+            Toast.makeText(this, "Unable to watch Noxs storage requests", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun cleanupStaleStorageTransfers() {
+        val cutoff = System.currentTimeMillis() - 6L * 60L * 60L * 1000L
+        listOf(paths.storageRequests, paths.storageResponses, paths.storagePayloads, paths.storageResponsePayloads)
+            .forEach { directory ->
+                directory.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
+            }
+    }
+
+    private fun processPendingStorageRequests() {
+        val recreated = runCatching { storageBridge.ensureControlDirectories() }.getOrElse { return }
+        if (recreated) {
+            cleanupStaleStorageTransfers()
+            armStorageObserver(force = true)
+        }
+        if (pendingStorageAction != null) return
+        val pendingFiles = paths.storageRequests.listFiles().orEmpty()
+        pendingFiles.filter(::isSymbolicLink).forEach { it.delete() }
+        val request = pendingFiles
+            .filter { it.isFile && !isSymbolicLink(it) }
+            .sortedBy { it.lastModified() }
+            .firstOrNull() ?: return
+        val requestId = request.name
+        if (!requestId.matches(Regex("[A-Za-z0-9._-]{1,120}"))) {
+            request.delete()
+            return
+        }
+        val lines = runCatching { request.readLines(Charsets.UTF_8) }.getOrDefault(emptyList())
+        request.delete()
+        if (lines.isEmpty()) {
+            completeStorageRequest(requestId, NoxsStorageBridge.CommandResult(false, "Empty storage request"))
+            return
+        }
+        val operation = lines[0].trim().lowercase()
+        val categoryKey = lines.getOrNull(1)?.trim().orEmpty()
+        val path = lines.getOrNull(2).orEmpty()
+        val argument = lines.getOrNull(3).orEmpty()
+
+        when (operation) {
+            "setup" -> confirmStoragePicker(requestId, NoxsStorageBridge.Category.SHARED)
+            "map" -> {
+                val category = NoxsStorageBridge.Category.fromKey(categoryKey)
+                if (category == null) {
+                    completeStorageRequest(requestId, NoxsStorageBridge.CommandResult(false, "Unknown storage category: $categoryKey"))
+                } else confirmStoragePicker(requestId, category)
+            }
+            "reset" -> confirmStorageReset(requestId)
+            else -> lifecycleScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    storageBridge.execute(requestId, operation, categoryKey, path, argument)
+                }
+                completeStorageRequest(requestId, result)
+            }
+        }
+    }
+
+    private fun confirmStoragePicker(requestId: String, category: NoxsStorageBridge.Category) {
+        pendingStorageAction = PendingStorageAction(requestId, category)
+        AlertDialog.Builder(this)
+            .setTitle("Noxs Storage Access")
+            .setMessage(
+                "Choose a folder for ${category.label}. Android will grant Noxs access only to the folder you select. " +
+                    "SAF access is available through Noxs storage commands, not as a Linux POSIX path."
+            )
+            .setPositiveButton("Choose folder") { _, _ -> launchStoragePicker() }
+            .setNegativeButton("Cancel") { _, _ ->
+                val pending = pendingStorageAction
+                pendingStorageAction = null
+                if (pending != null) completeStorageRequest(
+                    pending.requestId,
+                    NoxsStorageBridge.CommandResult(false, "Permission not granted; storage mappings were not changed")
+                )
+            }
+            .setOnCancelListener {
+                val pending = pendingStorageAction
+                pendingStorageAction = null
+                if (pending != null) completeStorageRequest(
+                    pending.requestId,
+                    NoxsStorageBridge.CommandResult(false, "Permission not granted; storage mappings were not changed")
+                )
+            }
+            .show()
+    }
+
+    private fun launchStoragePicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+            )
+        }
+        storagePickerLauncher.launch(intent)
+    }
+
+    private fun onStoragePickerResult(result: ActivityResult) {
+        val pending = pendingStorageAction ?: return
+        pendingStorageAction = null
+        val uri: Uri? = result.data?.data
+        if (result.resultCode != RESULT_OK || uri == null) {
+            completeStorageRequest(
+                pending.requestId,
+                NoxsStorageBridge.CommandResult(false, "Folder access was cancelled or denied; no mapping was saved")
+            )
+            return
+        }
+        val response = runCatching {
+            storageBridge.grantTree(pending.category, uri, result.data?.flags ?: 0)
+            NoxsStorageBridge.CommandResult(
+                true,
+                "${pending.category.label} folder permission saved.\n${storageBridge.statusText()}"
+            )
+        }.getOrElse {
+            NoxsStorageBridge.CommandResult(false, it.message ?: "Could not retain access to the selected folder")
+        }
+        completeStorageRequest(pending.requestId, response)
+    }
+
+    private fun confirmStorageReset(requestId: String) {
+        pendingStorageAction = PendingStorageAction(requestId, NoxsStorageBridge.Category.SHARED)
+        AlertDialog.Builder(this)
+            .setTitle("Reset Noxs storage mappings?")
+            .setMessage(
+                "This releases Noxs' saved folder permissions and clears its mappings. " +
+                    "It will not delete, move, or modify files in Android storage."
+            )
+            .setPositiveButton("Reset mappings") { _, _ ->
+                lifecycleScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching { storageBridge.resetMappings() }
+                            .fold(
+                                onSuccess = { NoxsStorageBridge.CommandResult(true, "Noxs storage mappings reset. Android files were not deleted.") },
+                                onFailure = { NoxsStorageBridge.CommandResult(false, it.message ?: "Storage reset failed") }
+                            )
+                    }
+                    pendingStorageAction = null
+                    completeStorageRequest(requestId, result)
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                pendingStorageAction = null
+                completeStorageRequest(requestId, NoxsStorageBridge.CommandResult(false, "Reset cancelled; no mappings changed"))
+            }
+            .setOnCancelListener {
+                pendingStorageAction = null
+                completeStorageRequest(requestId, NoxsStorageBridge.CommandResult(false, "Reset cancelled; no mappings changed"))
+            }
+            .show()
+    }
+
+    private fun completeStorageRequest(requestId: String, result: NoxsStorageBridge.CommandResult) {
+        if (!requestId.matches(Regex("[A-Za-z0-9._-]{1,120}"))) return
+        if (runCatching { storageBridge.ensureControlDirectories() }.isFailure) return
+        val response = File(paths.storageResponses, requestId)
+        val temporary = File(paths.storageResponses, "$requestId.${java.util.UUID.randomUUID()}.tmp")
+        runCatching {
+            paths.storageResponses.mkdirs()
+            temporary.writeText("${if (result.ok) "OK" else "ERR"}\n${result.output.trimEnd()}\n", Charsets.UTF_8)
+            if (isSymbolicLink(response)) response.delete()
+            if (response.exists() && !response.delete()) {
+                temporary.delete()
+                return@runCatching
+            }
+            if (!temporary.renameTo(response)) {
+                temporary.delete()
+                return@runCatching
+            }
+        }
+        if (pendingStorageAction?.requestId == requestId) pendingStorageAction = null
+        if (storageObserver != null) processPendingStorageRequests()
+    }
+
+    private fun isSymbolicLink(file: File): Boolean = runCatching {
+        val mode = android.system.Os.lstat(file.absolutePath).st_mode
+        (mode and android.system.OsConstants.S_IFMT) == android.system.OsConstants.S_IFLNK
+    }.getOrDefault(false)
+
+    private fun renderSessions(list: List<NoxsSessionManager.Entry>) {
+        val adapter = sessionAdapter ?: return
+        adapter.submit(list.map { entry ->
+            TwoLineRow(
+                title = entry.label + (if (entry.loginAsRoot) " [ROOT]" else ""),
+                subtitle = if (entry.session.isRunning) "running" else "exited (${entry.session.exitCode})",
+                onClick = {
+                    current = entry
+                    attachCurrent()
+                    binding.drawer.closeDrawer(GravityCompat.START)
+                },
+                onLongClick = {
+                    sessionManager?.closeSession(entry)
+                    if (current === entry) current = list.firstOrNull { it !== entry }
+                    attachCurrent()
+                }
+            )
+        })
+        binding.statusDot.setBackgroundResource(
+            if (list.any { it.session.isRunning }) R.color.noxs_ok else R.color.noxs_warn
+        )
+        renderSessionTabs(list)
+    }
+
+    private fun renderSessionTabs(list: List<NoxsSessionManager.Entry>) {
+        val row = binding.sessionTabsRow
+        row.removeAllViews()
+        val dp = getResources().displayMetrics.density
+
+        // 1. Active session tabs
+        list.forEach { entry ->
+            val isSelected = entry === current
+            val tab = TextView(this).apply {
+                val dot = if (entry.session.isRunning) "● " else "○ "
+                val rootTag = if (entry.loginAsRoot) " [root]" else ""
+                text = "$dot${entry.label}$rootTag"
+                typeface = Typeface.MONOSPACE
+                textSize = 11.5f
+                setTextColor(if (isSelected) Color.BLACK else 0xffe6e6e6.toInt())
+                background = GradientDrawable().apply {
+                    cornerRadius = 6f * dp
+                    setColor(if (isSelected) 0xff3ddc84.toInt() else 0xff232a35.toInt())
+                    setStroke((1 * dp).toInt(), if (isSelected) 0xff3ddc84.toInt() else 0xff2f3946.toInt())
+                }
+                setPadding((10 * dp).toInt(), (4 * dp).toInt(), (10 * dp).toInt(), (4 * dp).toInt())
+                setOnClickListener {
+                    current = entry
+                    attachCurrent()
+                    renderSessionTabs(list)
+                }
+                setOnLongClickListener {
+                    sessionManager?.closeSession(entry)
+                    true
+                }
+            }
+            row.addView(tab, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (6 * dp).toInt() })
+        }
+
+    }
+
+    private suspend fun refreshStatus() {
+        val r = resources ?: return
+        val usage = withContext(Dispatchers.IO) { r.currentUsage() }
+        binding.statusCpu.text = getString(R.string.status_cpu, "%.0f".format(usage.cpuPercent))
+        binding.statusMem.text = getString(R.string.status_mem, usage.memMb.toString(), usage.totalMemMb.toString())
+        binding.statusStorage.text = getString(R.string.status_storage, usage.storageUsedMb.toString())
+    }
+
+    // ---- TerminalSessionClient forwarding to the terminal views ----
+
+    override fun onTextChanged(session: TerminalSession) {
+        if (current?.session === session) binding.terminal.onSessionOutputChanged(session)
+    }
+
+    override fun onTitleChanged(session: TerminalSession) {
+        if (current?.session === session) binding.statusSession.text = session.label
+    }
+
+    override fun onBell(session: TerminalSession) {
+        Toast.makeText(this, "🔔 ${session.label}", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onSessionFinished(session: TerminalSession) {
+        if (current?.session === session) {
+            binding.terminal.invalidate()
+            binding.statusSession.text = "${session.label} (exited ${session.exitCode})"
+        }
+        Toast.makeText(
+            this,
+            getString(R.string.session_finished_toast, session.label, session.exitCode),
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (binding.drawer.isDrawerOpen(GravityCompat.START)) {
+            binding.drawer.closeDrawer(GravityCompat.START)
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    private companion object {
+        const val STATE_STORAGE_REQUEST_ID = "storage_request_id"
+        const val STATE_STORAGE_CATEGORY = "storage_category"
+        const val PREFS_SETTINGS = "noxs_settings"
+        const val PREF_FIRST_SHELL_WELCOME_SHOWN = "first_shell_welcome_shown"
+        const val WEBSITE_URL = "https://crossberry.vercel.app"
+        const val SUPPORT_EMAIL = "mailto:crossberryweb@gmail.com"
+    }
+}

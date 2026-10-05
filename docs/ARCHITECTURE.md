@@ -55,6 +55,11 @@ configure → user+password → /run init → apt init → first shell).
 argv (unit tested) → `NativePty.create` (forkpty) → proot → `su -l noxs` →
 bash reads `/etc/profile.d/noxs.sh` (env + quotas + FHS links).
 
+Every PRoot invocation includes `--link2symlink`: Android app-private storage can deny
+native hard-link creation, while dpkg uses a hard-link operation when saving its
+status backup. PRoot emulates guest hard links inside the sandbox; this does not
+grant Android root or change host files outside Noxs.
+
 **Manager screens** — run one-shot commands inside the same sandbox via
 `OneShotExecutor` (`proot … /bin/bash -c 'dpkg-query …'`) and parse results.
 

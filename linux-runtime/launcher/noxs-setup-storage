@@ -1,0 +1,3 @@
+#!/bin/sh
+# Noxs SAF storage setup shortcut. Android presents the actual folder picker.
+exec noxs storage setup

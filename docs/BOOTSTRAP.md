@@ -32,7 +32,7 @@ Noxs logo → "Linux environment setup"
   → noxs user creation    (passwd/group/shadow + sudo group)
   → password collection   (wizard → chpasswd stdin; never stored)
   → /run + /var/run init  (runtime state dirs inside the rootfs)
-  → apt init              (sources written; `apt update` on first online use)
+  → signed APT bootstrap  (narrow dpkg repair; temporary signed Debian HTTP sources; install/verify CA certificates; switch to one HTTPS Bookworm source file; require HTTPS `apt-get update`, `apt-cache` metadata, and a clean `dpkg --audit`)
   → first shell
 ```
 

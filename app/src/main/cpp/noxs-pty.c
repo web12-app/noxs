@@ -59,7 +59,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
  * the pty as its controlling terminal.
  */
 JNIEXPORT jintArray JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_create(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_create(
         JNIEnv *env, jclass clazz,
         jobjectArray cmd, jobjectArray envArr, jstring cwd,
         jint rows, jint cols) {
@@ -189,7 +189,7 @@ Java_com_noxs_linux_terminal_emulator_NativePty_create(
 }
 
 JNIEXPORT void JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_setSize(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_setSize(
         JNIEnv *env, jclass clazz, jint fd, jint rows, jint cols) {
     struct winsize ws;
     memset(&ws, 0, sizeof(ws));
@@ -200,7 +200,7 @@ Java_com_noxs_linux_terminal_emulator_NativePty_setSize(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_waitFor(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_waitFor(
         JNIEnv *env, jclass clazz, jint pid) {
     int status = 0;
     if (waitpid((pid_t) pid, &status, 0) < 0) return -1;
@@ -210,19 +210,32 @@ Java_com_noxs_linux_terminal_emulator_NativePty_waitFor(
 }
 
 JNIEXPORT void JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_sendSignal(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_sendSignal(
         JNIEnv *env, jclass clazz, jint pid, jint signal) {
     kill((pid_t) pid, (int) signal);
 }
 
+/* Ask the foreground interactive shell/readline to redisplay after output
+ * from a background job arrived while its prompt was accepting input. */
 JNIEXPORT void JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_closeFd(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_requestRedraw(
+        JNIEnv *env, jclass clazz, jint pid, jint master_fd) {
+    pid_t foreground = tcgetpgrp((int) master_fd);
+    if (foreground > 0) {
+        kill(-foreground, SIGWINCH);
+    } else if (pid > 0) {
+        kill((pid_t) pid, SIGWINCH);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_crossberry_noxs_terminal_emulator_NativePty_closeFd(
         JNIEnv *env, jclass clazz, jint fd) {
     close((int) fd);
 }
 
 JNIEXPORT jint JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_readBytes(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_readBytes(
         JNIEnv *env, jclass clazz, jint fd, jbyteArray buf, jint off, jint len) {
     jbyte *cbuf = (*env)->GetByteArrayElements(env, buf, NULL);
     ssize_t n = read((int) fd, cbuf + off, (size_t) len);
@@ -232,7 +245,7 @@ Java_com_noxs_linux_terminal_emulator_NativePty_readBytes(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_noxs_linux_terminal_emulator_NativePty_writeBytes(
+Java_com_crossberry_noxs_terminal_emulator_NativePty_writeBytes(
         JNIEnv *env, jclass clazz, jint fd, jbyteArray data) {
     jsize len = (*env)->GetArrayLength(env, data);
     jbyte *cbuf = (*env)->GetByteArrayElements(env, data, NULL);

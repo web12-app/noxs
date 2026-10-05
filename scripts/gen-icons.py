@@ -15,9 +15,9 @@ from pathlib import Path
 N_POLYGON = [(30, 78), (30, 30), (38, 30), (64, 62), (64, 30), (72, 30),
              (72, 78), (64, 78), (38, 46), (38, 78)]
 BAR_POLYGON = [(30, 84), (78, 84), (78, 88), (30, 88)]
-BG = (0x10, 0x14, 0x1A, 0xFF)
-GREEN = (0x3D, 0xDC, 0x84, 0xFF)
-BLUE = (0x6E, 0xA8, 0xFE, 0xFF)
+BG = (0x00, 0x00, 0x00, 0xFF)
+WHITE = (0xFF, 0xFF, 0xFF, 0xFF)
+GRAY = (0xBD, 0xBD, 0xBD, 0xFF)
 
 
 def point_in_poly(x, y, poly):
@@ -42,9 +42,9 @@ def render(size):
         for px in range(total):
             vx = (px + 0.5) * 108.0 / total
             if point_in_poly(vx, vy, N_POLYGON):
-                c = GREEN
+                c = WHITE
             elif point_in_poly(vx, vy, BAR_POLYGON):
-                c = BLUE
+                c = GRAY
             else:
                 c = BG
             acc[(py // ss)][(px // ss)][0] += c[0]
