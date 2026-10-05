@@ -56,6 +56,17 @@
                 android:textStyle="bold"
                 android:textSize="13sp" />
 
+            <TextView
+                android:id="@+id/status_proc"
+                style="@style/Text.Noxs.Mono"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/status_proc_desc"
+                android:text=""
+                android:textColor="@color/noxs_text_dim"
+                android:textSize="11sp" />
+
             <View
                 android:layout_width="0dp"
                 android:layout_height="1dp"
@@ -269,6 +280,140 @@
             </LinearLayout>
         </HorizontalScrollView>
 
+        <!-- Compact terminal toolbar: scroll / clipboard / search / font controls -->
+        <HorizontalScrollView
+            android:id="@+id/terminal_toolbar_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:background="@color/noxs_surface"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/terminal_toolbar"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp">
+
+                <TextView
+                    android:id="@+id/btn_scroll_top"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_scroll_top"
+                    android:gravity="center"
+                    android:text="↑"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btn_scroll_bottom"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_scroll_bottom"
+                    android:gravity="center"
+                    android:text="↓"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btn_tb_copy"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_copy"
+                    android:gravity="center"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="@string/action_copy"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btn_tb_paste"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_paste"
+                    android:gravity="center"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="@string/action_paste"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btn_tb_search"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_search"
+                    android:gravity="center"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="@string/action_search"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btn_font_decr"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_font_decrease"
+                    android:gravity="center"
+                    android:text="A−"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/font_size_label"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:contentDescription="@string/terminal_font_current"
+                    android:gravity="center"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="14"
+                    android:textColor="@color/noxs_accent"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btn_font_incr"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_font_increase"
+                    android:gravity="center"
+                    android:text="A+"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btn_tb_more"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_more"
+                    android:gravity="center"
+                    android:text="⋮"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
         <!-- Active session tabs -->
         <HorizontalScrollView
             android:id="@+id/session_tabs_scroll"
@@ -306,6 +451,84 @@
                 android:layout_height="match_parent"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
+
+            <!-- Output search bar (hidden until Search is tapped) -->
+            <LinearLayout
+                android:id="@+id/search_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:background="@color/noxs_surface"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="6dp"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/et_search"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:contentDescription="@string/terminal_search_hint"
+                    android:fontFamily="monospace"
+                    android:hint="@string/terminal_search_hint"
+                    android:imeOptions="actionSearch|flagNoFullscreen"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:textColor="@color/noxs_text"
+                    android:textColorHint="@color/noxs_text_dim"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/tv_search_count"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text=""
+                    android:textColor="@color/noxs_text_dim"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btn_search_prev"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_search_prev"
+                    android:gravity="center"
+                    android:text="↑"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btn_search_next"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/terminal_search_next"
+                    android:gravity="center"
+                    android:text="↓"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btn_search_close"
+                    style="@style/Text.Noxs.Mono"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_close"
+                    android:gravity="center"
+                    android:text="✕"
+                    android:textColor="@color/noxs_text"
+                    android:textSize="13sp" />
+            </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_terminal_latest"

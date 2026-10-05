@@ -80,6 +80,11 @@ class TerminalSession(
     var receivedBytes: Long = 0L
         private set
 
+    /** System.currentTimeMillis of the last PTY output chunk (session status). */
+    @Volatile
+    var lastOutputAtMs: Long = 0L
+        private set
+
     private var masterFd: Int = -1
     private var stdinStream: OutputStream? = null
     private var process: Process? = null
@@ -151,6 +156,7 @@ class TerminalSession(
                     if (n < 0) break
                     if (n > 0) {
                         receivedBytes += n
+                        lastOutputAtMs = System.currentTimeMillis()
                         val promptWasActive = emulator.promptActive
                         emulator.write(buf, n)
                         if (promptWasActive && emulator.promptActive && isPty && isRunning && masterFd >= 0 &&

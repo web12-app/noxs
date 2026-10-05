@@ -1,16 +1,21 @@
 /*
  * Noxs terminal-view — original implementation.
  * Canvas-based renderer for the Noxs terminal buffer.
+ *
+ * Appearance is theme-driven (TerminalTheme), supports font family, letter
+ * spacing, line spacing, three cursor shapes with configurable width and
+ * blink, and overlay search highlights. All per-frame Paint objects are
+ * reused; nothing is allocated inside render().
  */
 package com.crossberry.noxs.terminal.view
 
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
-import com.crossberry.noxs.shared.NoxsConstants
 import com.crossberry.noxs.terminal.emulator.TerminalBuffer
 import com.crossberry.noxs.terminal.emulator.TerminalColors
 import com.crossberry.noxs.terminal.emulator.TerminalEmulator
+import com.crossberry.noxs.terminal.emulator.TerminalSearchMatch
 import com.crossberry.noxs.terminal.emulator.TerminalSelection
 import com.crossberry.noxs.terminal.emulator.ResolvedTerminalSelection
 import com.crossberry.noxs.terminal.emulator.TextStyle
@@ -36,21 +41,57 @@ class TerminalRenderer {
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
+    private val highlightPaint = Paint().apply { style = Paint.Style.FILL }
 
-    private val defaultFg = 0xffe6e6e6.toInt()
-    private val defaultBg = 0xff101010.toInt()
-    private val selectionColor = 0x667f7f7f
-    private val cursorColor = 0xffe2e2e2.toInt()
-    private val linkColor = 0xffbdbdbd.toInt()
+    var textAntialias: Boolean = true
+        set(value) {
+            field = value
+            textPaint.isAntiAlias = value
+        }
 
+    var theme: TerminalTheme = TerminalTheme.NOXS_DARK
     var fontSizeSp: Float = 14f
     var densityScale: Float = 1f
+
+    /** Typeface family for all glyphs (monospaced metrics expected). */
+    var fontFamily: Typeface = Typeface.MONOSPACE
+        set(value) {
+            field = value
+            textPaint.typeface = value
+        }
+
+    /**
+     * Inset around the terminal content, in pixels. Background fills the full
+     * view; glyphs, highlights, selection and cursor are offset by this pad.
+     */
+    var contentPaddingPx: Float = 0f
+
+    /** Extra space between glyphs, in em units (0 = default metrics). */
+    var letterSpacingEm: Float = 0f
+        set(value) {
+            field = value
+            textPaint.letterSpacing = value
+        }
+
+    /** Vertical spacing multiplier: 1.0 = natural font height. */
+    var lineSpacing: Float = 1f
+
+    /** Cursor shape + thickness multiplier (underline/bar, 1..4). */
+    var cursorStyle: TerminalCursorStyle = TerminalCursorStyle.BLOCK
+    var cursorWidth: Int = 2
 
     fun measure(): Metrics {
         textPaint.textSize = fontSizeSp * densityScale
         val fm = textPaint.fontMetrics
-        val cw = textPaint.measureText("W")
-        return Metrics(cw, fm.descent - fm.ascent, -fm.ascent)
+        val cw = if (letterSpacingEm == 0f) {
+            textPaint.measureText("W")
+        } else {
+            // Letter spacing appends after each glyph; a single "W" would not
+            // include it. Two glyphs / two columns yields the true advance.
+            textPaint.measureText("WW") / 2f
+        }
+        val natural = fm.descent - fm.ascent
+        return Metrics(cw, natural * lineSpacing, -fm.ascent * lineSpacing)
     }
 
     fun render(
@@ -60,31 +101,53 @@ class TerminalRenderer {
         scrollRows: Int,
         focused: Boolean,
         density: Float,
-        selection: TerminalSelection? = null
+        selection: TerminalSelection? = null,
+        searchMatches: List<TerminalSearchMatch> = emptyList(),
+        currentMatch: TerminalSearchMatch? = null
     ) {
         val buf = emulator.buffer
-        canvas.drawColor(defaultBg)
+        canvas.drawColor(theme.defaultBg)
 
         val cw = metrics.charWidth
         val ch = metrics.charHeight
         if (cw <= 0f || ch <= 0f) return
+        val pad = contentPaddingPx
 
         val screenRows = minOf(buf.rows, buf.screen().size)
-        val visibleRows = (canvas.height / ch).toInt().coerceAtLeast(1).coerceAtMost(screenRows)
+        val areaHeight = canvas.height - 2f * pad
+        val visibleRows = (areaHeight / ch).toInt().coerceAtLeast(1).coerceAtMost(screenRows)
         val firstDocumentRow = buf.viewportStartDocumentRow(scrollRows, visibleRows)
+        val lastDocumentRow = firstDocumentRow + visibleRows - 1
         val resolvedSelection = selection?.let(buf::resolveSelection)
+
+        // Search highlights underlay the glyphs; the active match is strongest.
+        if (searchMatches.isNotEmpty()) {
+            for (match in searchMatches) {
+                if (match.row < firstDocumentRow || match.row > lastDocumentRow) continue
+                val visRow = match.row - firstDocumentRow
+                highlightPaint.color = if (match === currentMatch || match == currentMatch) {
+                    0x9666aaff
+                } else {
+                    0x55666aff
+                }
+                canvas.drawRect(
+                    pad + match.startCol * cw, pad + visRow * ch, pad + match.endCol * cw, pad + (visRow + 1) * ch,
+                    highlightPaint
+                )
+            }
+        }
 
         for (visRow in 0 until visibleRows) {
             val documentRow = firstDocumentRow + visRow
             val line = buf.documentLineAt(documentRow) ?: continue
-            val top = visRow * ch
-            renderRow(canvas, line, top, cw, ch, metrics, scrollRows == 0 && focused, density)
+            val top = pad + visRow * ch
+            renderRow(canvas, line, top, pad, cw, ch, metrics, scrollRows == 0 && focused, density)
             if (resolvedSelection != null) {
-                drawSelectionRow(canvas, line, documentRow, resolvedSelection, visRow, cw, ch)
+                drawSelectionRow(canvas, line, documentRow, resolvedSelection, visRow, pad, cw, ch)
             }
         }
         if (selection != null && resolvedSelection != null) {
-            drawSelectionHandles(canvas, resolvedSelection, firstDocumentRow, cw, ch, density)
+            drawSelectionHandles(canvas, resolvedSelection, firstDocumentRow, pad, cw, ch, density)
         }
     }
 
@@ -102,13 +165,14 @@ class TerminalRenderer {
     ): HandleLocations {
         val range = buffer.resolveSelection(selection) ?: return HandleLocations(null, null)
         val firstDocumentRow = buffer.viewportStartDocumentRow(scrollRows, viewportRows)
+        val pad = contentPaddingPx
         val anchor = handleLocation(
             range.anchorRow, range.anchorColumn, true, firstDocumentRow, charWidth, charHeight,
-            viewWidth, viewHeight, density
+            viewWidth, viewHeight, density, pad
         )
         val focus = handleLocation(
             range.focusRow, range.focusColumn, false, firstDocumentRow, charWidth, charHeight,
-            viewWidth, viewHeight, density
+            viewWidth, viewHeight, density, pad
         )
         return HandleLocations(anchor, focus)
     }
@@ -119,6 +183,7 @@ class TerminalRenderer {
         documentRow: Int,
         range: ResolvedTerminalSelection,
         visibleRow: Int,
+        pad: Float,
         cw: Float,
         ch: Float
     ) {
@@ -127,25 +192,26 @@ class TerminalRenderer {
         if (cols <= 0) return
         val from = (if (documentRow == range.firstRow) range.firstColumn else 0).coerceIn(0, cols - 1)
         val to = (if (documentRow == range.lastRow) range.lastColumn else cols - 1).coerceIn(from, cols - 1)
-        bgPaint.color = selectionColor
-        canvas.drawRect(from * cw, visibleRow * ch, (to + 1) * cw, (visibleRow + 1) * ch, bgPaint)
+        bgPaint.color = theme.selectionColor
+        canvas.drawRect(pad + from * cw, pad + visibleRow * ch, pad + (to + 1) * cw, pad + (visibleRow + 1) * ch, bgPaint)
     }
 
     private fun drawSelectionHandles(
         canvas: Canvas,
         range: ResolvedTerminalSelection,
         firstDocumentRow: Int,
+        pad: Float,
         cw: Float,
         ch: Float,
         density: Float
     ) {
         val anchor = handleLocation(
             range.anchorRow, range.anchorColumn, true, firstDocumentRow, cw, ch,
-            canvas.width, canvas.height, density
+            canvas.width, canvas.height, density, pad
         )
         val focus = handleLocation(
             range.focusRow, range.focusColumn, false, firstDocumentRow, cw, ch,
-            canvas.width, canvas.height, density
+            canvas.width, canvas.height, density, pad
         )
         if (anchor != null) drawHandle(canvas, anchor, density)
         if (focus != null) drawHandle(canvas, focus, density)
@@ -160,15 +226,16 @@ class TerminalRenderer {
         ch: Float,
         width: Int,
         height: Int,
-        density: Float
+        density: Float,
+        pad: Float
     ): HandleLocation? {
         val visibleRow = documentRow - firstDocumentRow
-        val visibleRows = (height / ch).toInt().coerceAtLeast(1)
+        val visibleRows = ((height - 2f * pad) / ch).toInt().coerceAtLeast(1)
         if (visibleRow !in 0 until visibleRows) return null
         val radius = HANDLE_RADIUS_DP * density
         val columnEdge = column + if (isAnchor) 0 else 1
-        val x = (columnEdge * cw).coerceIn(radius, (width - radius).coerceAtLeast(radius))
-        val y = ((visibleRow + 1) * ch - 2f * density)
+        val x = (pad + columnEdge * cw).coerceIn(radius, (width - radius).coerceAtLeast(radius))
+        val y = (pad + (visibleRow + 1) * ch - 2f * density)
             .coerceIn(radius, (height - radius).coerceAtLeast(radius))
         return HandleLocation(x, y)
     }
@@ -191,6 +258,7 @@ class TerminalRenderer {
         canvas: Canvas,
         line: TerminalBuffer.Line,
         top: Float,
+        pad: Float,
         cw: Float,
         ch: Float,
         metrics: Metrics,
@@ -205,24 +273,21 @@ class TerminalRenderer {
             var end = col + 1
             while (end < cols && line.styles[end] == style && line.hyperlinks.getOrNull(end) == hyperlink) end++
 
-            val fg = TerminalColors.colorOf(style, true, defaultFg, defaultBg)
-            val bg = TerminalColors.colorOf(style, false, defaultFg, defaultBg)
+            val fg = TerminalColors.colorOf(style, true, theme.defaultFg, theme.defaultBg)
+            val bg = TerminalColors.colorOf(style, false, theme.defaultFg, theme.defaultBg)
             val flags = TextStyle.flags(style)
             val reverse = flags and TextStyle.FLAG_REVERSE != 0
 
             var drawFg = if (flags and TextStyle.FLAG_INVISIBLE != 0) bg else fg
             var drawBg = bg
             if (reverse) { val t = drawFg; drawFg = drawBg; drawBg = t }
-            if (hyperlink != null && !reverse) drawFg = linkColor
+            if (hyperlink != null && !reverse) drawFg = theme.linkColor
 
-            if (drawBg != defaultBg) {
+            val leftX = pad + col * cw
+            val rightX = pad + end * cw
+            if (drawBg != theme.defaultBg) {
                 bgPaint.color = drawBg
-                canvas.drawRect(col * cw, top, end * cw, top + ch, bgPaint)
-            }
-
-            // cursor cell highlight
-            if (isCursorRow) {
-                // cursor position provided by view layer via cursorCol
+                canvas.drawRect(leftX, top, rightX, top + ch, bgPaint)
             }
 
             textPaint.isFakeBoldText = flags and TextStyle.FLAG_BOLD != 0
@@ -237,26 +302,31 @@ class TerminalRenderer {
                 sb.append(line.chars[i])
             }
             if (sb.isNotEmpty()) {
-                canvas.drawText(sb.toString(), col * cw, top + metrics.fontAscent, textPaint)
+                canvas.drawText(sb.toString(), leftX, top + metrics.fontAscent, textPaint)
             }
 
             if (flags and TextStyle.FLAG_UNDERLINE != 0 || hyperlink != null) {
                 underlinePaint.color = drawFg
                 underlinePaint.strokeWidth = 1.5f * density
-                canvas.drawLine(col * cw, top + ch - 2 * density, end * cw, top + ch - 2 * density, underlinePaint)
+                canvas.drawLine(leftX, top + ch - 2 * density, rightX, top + ch - 2 * density, underlinePaint)
             }
             if (flags and TextStyle.FLAG_STRIKETHROUGH != 0) {
                 underlinePaint.color = drawFg
                 underlinePaint.strokeWidth = 1.5f * density
                 val midY = top + ch * 0.55f
-                canvas.drawLine(col * cw, midY, end * cw, midY, underlinePaint)
+                canvas.drawLine(leftX, midY, rightX, midY, underlinePaint)
             }
 
             col = end
         }
     }
 
-    /** Draws the cursor block over the current cell (called after rows). */
+    /**
+     * Draws the cursor over the current cell. Shapes: block (filled cell),
+     * underline (bottom strip), bar (vertical strip). [cursorWidth] scales the
+     * strip thickness of underline/bar. Skipped while the viewport is away
+     * from the live bottom — a scrolled-back view must not fake a cursor.
+     */
     fun drawCursor(canvas: Canvas, emulator: TerminalEmulator, metrics: Metrics) {
         val buf = emulator.buffer
         if (!buf.cursorVisible || scrollOffset > 0) return
@@ -276,16 +346,31 @@ class TerminalRenderer {
         // VT terminals leave the cursor one cell past the right edge after a
         // printable character at the final column (wrap-pending state).
         val cursorCol = buf.cursorCol.coerceIn(0, colCount - 1)
-        val left = cursorCol * cw
-        val top = buf.cursorRow * ch
+        val pad = contentPaddingPx
+        val left = pad + cursorCol * cw
+        val top = pad + buf.cursorRow * ch
 
-        bgPaint.color = cursorColor and 0x60ffffff or (cursorColor and 0xff000000.toInt())
-        bgPaint.alpha = 70
-        canvas.drawRect(left, top, left + cw, top + ch, bgPaint)
-        bgPaint.alpha = 255
-        // Re-draw the character under the cursor inverted for visibility.
-        textPaint.color = 0xffffffff.toInt()
-        canvas.drawText(line.chars[cursorCol].toString(), left, top + metrics.fontAscent, textPaint)
+        val cursor = theme.cursorColor
+        when (cursorStyle) {
+            TerminalCursorStyle.BLOCK -> {
+                bgPaint.color = cursor and 0x60ffffff or (cursor and 0xff000000.toInt())
+                bgPaint.alpha = 70
+                canvas.drawRect(left, top, left + cw, top + ch, bgPaint)
+                bgPaint.alpha = 255
+                textPaint.color = 0xffffffff.toInt()
+                canvas.drawText(line.chars[cursorCol].toString(), left, top + metrics.fontAscent, textPaint)
+            }
+            TerminalCursorStyle.UNDERLINE -> {
+                val thickness = (cursorWidth.coerceIn(1, 4)) * 2f
+                bgPaint.color = cursor
+                canvas.drawRect(left, top + ch - thickness, left + cw, top + ch, bgPaint)
+            }
+            TerminalCursorStyle.BAR -> {
+                val widthPx = (cursorWidth.coerceIn(1, 4)) * 2f
+                bgPaint.color = cursor
+                canvas.drawRect(left, top, left + widthPx, top + ch, bgPaint)
+            }
+        }
     }
 
     var scrollOffset: Int = 0

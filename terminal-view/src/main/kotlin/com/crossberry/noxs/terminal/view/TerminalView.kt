@@ -1,7 +1,14 @@
 /*
  * Noxs terminal-view — original implementation.
  * Interactive Android terminal View: IME input, hardware keys, gestures
- * (scroll / copy / paste), resize propagation and renderer glue.
+ * (scroll / pinch zoom / two-finger scroll / copy / paste), three scroll
+ * modes with a new-output indicator, output search, configurable appearance,
+ * resize propagation and renderer glue.
+ *
+ * Gesture priority (spec): selection handles > long-press selection >
+ * pinch zoom > two-finger scroll > single-finger scroll. A decided
+ * two-pointer gesture is sticky until every pointer lifts, pinch wins ties,
+ * and touch gestures never send shell input.
  */
 package com.crossberry.noxs.terminal.view
 
@@ -16,8 +23,10 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.ActionMode
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
@@ -28,7 +37,11 @@ import android.widget.OverScroller
 import android.widget.PopupMenu
 import com.crossberry.noxs.terminal.emulator.KeyHandler
 import com.crossberry.noxs.terminal.emulator.SelectionAutoScroller
-import com.crossberry.noxs.terminal.emulator.TerminalGesturePolicy
+import com.crossberry.noxs.terminal.emulator.TerminalMultiTouchPolicy
+import com.crossberry.noxs.terminal.emulator.TerminalScrollModel
+import com.crossberry.noxs.terminal.emulator.TerminalScrollMode
+import com.crossberry.noxs.terminal.emulator.TerminalSearch
+import com.crossberry.noxs.terminal.emulator.TerminalSearchMatch
 import com.crossberry.noxs.terminal.emulator.TerminalSelection
 import com.crossberry.noxs.terminal.emulator.TerminalSelectionPoint
 import com.crossberry.noxs.terminal.emulator.TerminalSession
@@ -36,11 +49,13 @@ import com.crossberry.noxs.terminal.emulator.TerminalViewportState
 import com.crossberry.noxs.terminal.emulator.copyText
 import com.crossberry.noxs.terminal.emulator.resolveSelection
 import com.crossberry.noxs.terminal.emulator.selectAllText
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 class TerminalView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
-) : android.view.View(context, attrs) {
+) : View(context, attrs) {
 
     var session: TerminalSession? = null
         private set
@@ -53,6 +68,9 @@ class TerminalView @JvmOverloads constructor(
     private val scroller = OverScroller(context)
     private val viewport = TerminalViewportState()
     private val gesturePolicy = TerminalGesturePolicy()
+    private val multiTouch = TerminalMultiTouchPolicy(
+        ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    )
     private val edgeAutoScroller = SelectionAutoScroller(48f * resources.displayMetrics.density)
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private var scrollPixelRemainder = 0f
@@ -72,6 +90,30 @@ class TerminalView @JvmOverloads constructor(
     private var cursorBlinkOn = true
     private var composingText = ""
 
+    // Two-pointer state ------------------------------------------------------
+    private var multiLastX = 0f
+    private var multiLastY = 0f
+    private var suppressSingleFingerUntilUp = false
+    private var pinchBaseSp = -1f
+    private var pinchLastAppliedSp = -1f
+
+    // Scroll mode / output indicator ----------------------------------------
+    val scrollModel = TerminalScrollModel()
+    private var lastSeenScrollbackSerial: Long? = null
+
+    // Search state -----------------------------------------------------------
+    private var searchMatches: List<TerminalSearchMatch> = emptyList()
+    private var searchIndex = -1
+
+    // Appearance -------------------------------------------------------------
+    var minFontSizeSp: Float = 10f
+    var maxFontSizeSp: Float = 28f
+    var hapticsEnabled: Boolean = false
+    var longPressSelectionEnabled: Boolean = true
+    var cursorBlinkEnabled: Boolean = true
+    var cursorBlinkPeriodMs: Long = CURSOR_BLINK_MS
+    var reduceAnimations: Boolean = false
+
     private enum class SelectionEndpoint { ANCHOR, FOCUS }
 
     private val cursorBlinkRunnable = object : Runnable {
@@ -79,7 +121,7 @@ class TerminalView @JvmOverloads constructor(
             if (!isAttachedToWindow || !hasFocus()) return
             cursorBlinkOn = !cursorBlinkOn
             invalidate()
-            postDelayed(this, CURSOR_BLINK_MS)
+            postDelayed(this, cursorBlinkPeriodMs)
         }
     }
 
@@ -95,10 +137,10 @@ class TerminalView @JvmOverloads constructor(
             val now = SystemClock.uptimeMillis()
             val elapsed = if (lastAutoScrollFrameMs == 0L) 16L else (now - lastAutoScrollFrameMs).coerceIn(1L, 50L)
             lastAutoScrollFrameMs = now
-            val rowDelta = edgeAutoScroller.step(pointerY, height.toFloat(), elapsed)
-            if (rowDelta != 0) scrollViewportByRows(rowDelta)
+            val rowDelta = edgeAutoScroller.step(pointerY, contentHeightPx(), elapsed)
+            if (rowDelta != 0) scrollViewportByRows(rowDelta, byUser = true)
             updateSelectionFromPointer(pointerX, pointerY)
-            if (edgeAutoScroller.rowsPerSecond(pointerY, height.toFloat()) != 0f) {
+            if (edgeAutoScroller.rowsPerSecond(pointerY, contentHeightPx()) != 0f) {
                 scheduleEdgeAutoScroll()
             } else {
                 stopEdgeAutoScroll()
@@ -122,9 +164,46 @@ class TerminalView @JvmOverloads constructor(
     var onTerminalLinkClick: ((uri: String) -> Boolean)? = null
     /** true when attached to the live bottom; used for the "Latest" affordance. */
     var onScrollStateChanged: ((atLiveBottom: Boolean) -> Unit)? = null
+    /** Indicator text from the scroll model ("18 new lines" / "124 lines behind") or null. */
+    var onIndicatorChanged: ((label: String?) -> Unit)? = null
+    /** Font size settled (pinch end / explicit change) — persist the preference here. */
+    var onFontSizeChanged: ((sp: Float) -> Unit)? = null
+    /** Search result summary: total matches + current index (−1 = none active). */
+    var onSearchResult: ((count: Int, currentIndex: Int) -> Unit)? = null
 
     private val clipboard by lazy { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     private val imm by lazy { context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager }
+
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            // Base font is anchored on first USE so a late pinch decision
+            // (after the detector internally began) never jumps the size.
+            pinchBaseSp = -1f
+            pinchLastAppliedSp = renderer.fontSizeSp
+            return true
+        }
+
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            if (multiTouch.mode != TerminalMultiTouchPolicy.Mode.PINCH) return true
+            if (pinchBaseSp <= 0f) {
+                pinchBaseSp = renderer.fontSizeSp / detector.scaleFactor
+            }
+            val target = pinchBaseSp * detector.scaleFactor
+            // Snap to 0.5sp steps: smooth enough to feel continuous, cheap
+            // enough that PTY resizes stay rare during a pinch.
+            val snapped = (target * 2f).roundToInt() / 2f
+            if (snapped != pinchLastAppliedSp) {
+                pinchLastAppliedSp = snapped
+                setFontSizeSp(snapped)
+            }
+            return true
+        }
+
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            if (hapticsEnabled) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onFontSizeChanged?.invoke(renderer.fontSizeSp)
+        }
+    })
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean {
@@ -166,8 +245,10 @@ class TerminalView @JvmOverloads constructor(
         }
 
         override fun onLongPress(e: MotionEvent) {
+            if (!longPressSelectionEnabled) return
             val cell = cellAt(e.x, e.y) ?: return
             if (!gesturePolicy.onLongPress()) return
+            if (hapticsEnabled) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             beginSelection(cell, e.x, e.y)
         }
     })
@@ -177,7 +258,8 @@ class TerminalView @JvmOverloads constructor(
             actionMode = mode
             menu.add(0, ACTION_COPY, 0, "Copy")
             menu.add(0, ACTION_PASTE, 1, "Paste")
-            menu.add(0, ACTION_MORE, 2, "More…")
+            menu.add(0, ACTION_SHARE, 2, "Share")
+            menu.add(0, ACTION_MORE, 3, "More…")
             return true
         }
 
@@ -191,6 +273,11 @@ class TerminalView @JvmOverloads constructor(
             }
             ACTION_PASTE -> {
                 pasteFromClipboard()
+                mode.finish()
+                true
+            }
+            ACTION_SHARE -> {
+                shareSelection()
                 mode.finish()
                 true
             }
@@ -237,9 +324,15 @@ class TerminalView @JvmOverloads constructor(
         return synchronized(emu) { emu.hyperlinkAtDocumentPosition(cell.point.lineIdentity, cell.column) }
     }
 
+    private fun contentPaddingPx(): Float = renderer.contentPaddingPx
+
+    private fun contentHeightPx(): Float = (height - 2f * contentPaddingPx()).coerceAtLeast(1f)
+
+    private fun contentWidthPx(): Float = (width - 2f * contentPaddingPx()).coerceAtLeast(1f)
+
     private fun visibleRowCount(buffer: com.crossberry.noxs.terminal.emulator.TerminalBuffer? = session?.emulator?.buffer): Int {
         if (buffer == null) return 1
-        val measured = if (metrics.charHeight > 0f) (height / metrics.charHeight).toInt() else buffer.rows
+        val measured = if (metrics.charHeight > 0f) (contentHeightPx() / metrics.charHeight).toInt() else buffer.rows
         return measured.coerceAtLeast(1).coerceAtMost(buffer.rows.coerceAtLeast(1))
     }
 
@@ -249,13 +342,13 @@ class TerminalView @JvmOverloads constructor(
         return synchronized(emu) {
             val buffer = emu.buffer
             val rowCount = visibleRowCount(buffer)
-            val visibleRow = (y / metrics.charHeight).toInt().coerceIn(0, rowCount - 1)
+            val visibleRow = ((y - contentPaddingPx()) / metrics.charHeight).toInt().coerceIn(0, rowCount - 1)
             val firstRow = buffer.viewportStartDocumentRow(viewport.scrollOffsetFromBottom, rowCount)
             val documentRow = firstRow + visibleRow
             val line = buffer.documentLineAt(documentRow) ?: return@synchronized null
             val colCount = minOf(buffer.cols, line.chars.size)
             if (colCount <= 0) return@synchronized null
-            val column = (x / metrics.charWidth).toInt().coerceIn(0, colCount - 1)
+            val column = ((x - contentPaddingPx()) / metrics.charWidth).toInt().coerceIn(0, colCount - 1)
             Cell(TerminalSelectionPoint(line.identity, column), column)
         }
     }
@@ -325,7 +418,7 @@ class TerminalView @JvmOverloads constructor(
 
     private fun updateEdgeAutoScroll() {
         if (selection == null || (draggingEndpoint == null && !selectionGesture) ||
-            edgeAutoScroller.rowsPerSecond(pointerY, height.toFloat()) == 0f) {
+            edgeAutoScroller.rowsPerSecond(pointerY, contentHeightPx()) == 0f) {
             stopEdgeAutoScroll()
             return
         }
@@ -352,14 +445,26 @@ class TerminalView @JvmOverloads constructor(
         val rows = (scrollPixelRemainder / metrics.charHeight).toInt()
         if (rows == 0) return
         scrollPixelRemainder -= rows * metrics.charHeight
-        scrollViewportByRows(rows)
+        scrollViewportByRows(rows, byUser = true)
     }
 
-    private fun scrollViewportByRows(rows: Int) {
+    private fun scrollViewportByRows(rows: Int, byUser: Boolean) {
         val emu = session?.emulator ?: return
         synchronized(emu) { viewport.scrollByRows(rows, emu.buffer, visibleRowCount(emu.buffer)) }
-        notifyScrollState()
+        if (byUser) markUserScroll()
+        else notifyScrollState()
         invalidate()
+    }
+
+    /** Feed user-driven viewport motion into the scroll-mode policy. */
+    private fun markUserScroll() {
+        val emu = session?.emulator
+        val atBottom = if (emu == null) true else synchronized(emu) {
+            viewport.synchronize(emu.buffer, visibleRowCount(emu.buffer))
+            viewport.scrollOffsetFromBottom == 0
+        }
+        scrollModel.onUserScroll(atBottom)
+        notifyScrollState()
     }
 
     private fun startFling(velocityY: Float) {
@@ -373,6 +478,13 @@ class TerminalView @JvmOverloads constructor(
             startOffset = viewport.scrollOffsetFromBottom
         }
         if (maxOffset <= 0 || metrics.charHeight <= 0f) return
+        if (reduceAnimations) {
+            // Reduced-motion preference: skip the physics animation entirely.
+            viewport.scrollByRows(if (velocityY < 0) 12 else -12, emu.buffer, visibleRowCount(emu.buffer))
+            markUserScroll()
+            invalidate()
+            return
+        }
         // OverScroller coordinates are rows here, while GestureDetector reports
         // pixels per second; convert units to avoid extremely fast terminal flings.
         val velocityRowsPerSecond = (velocityY / metrics.charHeight).toInt()
@@ -391,10 +503,22 @@ class TerminalView @JvmOverloads constructor(
         clipboard.setPrimaryClip(ClipData.newPlainText("noxs-selection", text))
     }
 
+    private fun shareSelection() {
+        val text = selectedText() ?: return
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        runCatching {
+            context.startActivity(android.content.Intent.createChooser(send, null))
+        }
+    }
+
     private fun showMoreSelectionMenu() {
         val popup = PopupMenu(context, this)
         popup.menu.add(0, MORE_SELECT_ALL, 0, "Select all output")
         popup.menu.add(0, MORE_COPY_ALL, 1, "Copy all output")
+        popup.menu.add(0, MORE_CLEAR_SCROLLBACK, 2, "Clear scrollback")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 MORE_SELECT_ALL -> {
@@ -415,19 +539,155 @@ class TerminalView @JvmOverloads constructor(
                     actionMode?.finish()
                     true
                 }
+                MORE_CLEAR_SCROLLBACK -> {
+                    clearScrollback()
+                    actionMode?.finish()
+                    true
+                }
                 else -> false
             }
         }
         popup.show()
     }
 
+    /** Clears history rows only — never the screen, shell, filesystem or shell history. */
+    fun clearScrollback() {
+        val emu = session?.emulator ?: return
+        synchronized(emu) { emu.buffer.clearScrollback() }
+        markUserScroll()
+        invalidate()
+    }
+
+    // ------------------------------------------------------------ scroll state
+
     private fun notifyScrollState() {
         val emu = session?.emulator
-        val atBottom = if (emu == null) true else synchronized(emu) {
+        var atBottom = true
+        if (emu != null) synchronized(emu) {
             viewport.synchronize(emu.buffer, visibleRowCount(emu.buffer))
-            viewport.scrollOffsetFromBottom == 0
+            atBottom = viewport.scrollOffsetFromBottom == 0
         }
         onScrollStateChanged?.invoke(atBottom)
+        onIndicatorChanged?.invoke(scrollModel.indicatorLabel(atBottom, viewport.scrollOffsetFromBottom))
+    }
+
+    /** Scroll position (rows above the live bottom) for state restoration. */
+    fun currentScrollOffset(): Int = viewport.scrollOffsetFromBottom
+
+    /** Restores a saved scroll position (session re-attach, activity recreate). */
+    fun restoreScrollOffset(offset: Int) {
+        if (offset <= 0) return
+        val emu = session?.emulator ?: return
+        synchronized(emu) {
+            viewport.setOffsetFromBottom(offset, emu.buffer, visibleRowCount(emu.buffer))
+        }
+        scrollModel.onUserScroll(false)
+        notifyScrollState()
+        invalidate()
+    }
+
+    // ----------------------------------------------------------------- search
+
+    /**
+     * Searches the whole document (scrollback + screen) for [query]. Pure
+     * buffer reads: never writes shell input, never interrupts processes.
+     */
+    fun setSearchQuery(query: String) {
+        val emu = session?.emulator
+        if (emu == null) {
+            searchMatches = emptyList()
+            searchIndex = -1
+            onSearchResult?.invoke(0, -1)
+            return
+        }
+        synchronized(emu) {
+            searchMatches = if (query.isBlank()) {
+                emptyList()
+            } else {
+                TerminalSearch.find(emu.buffer, query.trim())
+            }
+            // Anchor on the newest match so the user lands near their prompt.
+            searchIndex = searchMatches.lastIndex
+            if (searchIndex >= 0) jumpToMatchLocked(emu)
+        }
+        onSearchResult?.invoke(searchMatches.size, searchIndex)
+        invalidate()
+    }
+
+    fun searchNextMatch() {
+        if (searchMatches.isEmpty()) return
+        searchIndex = TerminalSearch.step(searchMatches, searchIndex, forward = true)
+        val emu = session?.emulator ?: return
+        synchronized(emu) { jumpToMatchLocked(emu) }
+        onSearchResult?.invoke(searchMatches.size, searchIndex)
+        invalidate()
+    }
+
+    fun searchPreviousMatch() {
+        if (searchMatches.isEmpty()) return
+        searchIndex = TerminalSearch.step(searchMatches, searchIndex, forward = false)
+        val emu = session?.emulator ?: return
+        synchronized(emu) { jumpToMatchLocked(emu) }
+        onSearchResult?.invoke(searchMatches.size, searchIndex)
+        invalidate()
+    }
+
+    fun clearSearch() {
+        if (searchMatches.isEmpty() && searchIndex < 0) return
+        searchMatches = emptyList()
+        searchIndex = -1
+        onSearchResult?.invoke(0, -1)
+        invalidate()
+    }
+
+    /** Caller must hold the emulator monitor. */
+    private fun jumpToMatchLocked(emu: com.crossberry.noxs.terminal.emulator.TerminalEmulator) {
+        val match = searchMatches.getOrNull(searchIndex) ?: return
+        val rows = visibleRowCount(emu.buffer)
+        val documentRows = emu.buffer.documentRowCount()
+        // Place the match roughly one third from the top of the viewport.
+        val offset = (documentRows - match.row - rows / 3).coerceIn(0, emu.buffer.maxScrollOffset(rows))
+        viewport.setOffsetFromBottom(offset, emu.buffer, rows)
+    }
+
+    // ---------------------------------------------------------------- gestures
+
+    private fun spanOf(event: MotionEvent): Float {
+        if (event.pointerCount < 2) return 0f
+        return hypot(
+            event.getX(0) - event.getX(1),
+            event.getY(0) - event.getY(1)
+        )
+    }
+
+    private fun centroidOf(event: MotionEvent): Pair<Float, Float> {
+        val n = event.pointerCount
+        if (n == 0) return 0f to 0f
+        var sx = 0f
+        var sy = 0f
+        for (i in 0 until n) {
+            sx += event.getX(i)
+            sy += event.getY(i)
+        }
+        return sx / n to sy / n
+    }
+
+    private fun handleMultiTouchMove(event: MotionEvent): Boolean {
+        val (cx, cy) = centroidOf(event)
+        val dx = cx - multiLastX
+        val dyUp = multiLastY - cy // fingers moving up → toward older output
+        val mode = multiTouch.onMove(spanOf(event), dx, dyUp)
+        multiLastX = cx
+        multiLastY = cy
+        when (mode) {
+            TerminalMultiTouchPolicy.Mode.PINCH -> scaleDetector.onTouchEvent(event)
+            TerminalMultiTouchPolicy.Mode.TWO_FINGER_SCROLL -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                scrollByPixels(dyUp)
+            }
+            else -> Unit
+        }
+        return true
     }
 
     /** Called by the PTY session's coalesced main-thread output notification. */
@@ -435,8 +695,22 @@ class TerminalView @JvmOverloads constructor(
         if (session !== changedSession) return
         val emu = changedSession.emulator
         synchronized(emu) {
-            viewport.synchronize(emu.buffer, visibleRowCount(emu.buffer))
-            if (selection != null && emu.buffer.resolveSelection(selection!!) == null) {
+            val buffer = emu.buffer
+            val rows = visibleRowCount(buffer)
+            val before = lastSeenScrollbackSerial
+            val pushed = if (before == null) 0L else (buffer.scrollbackSerial - before).coerceAtLeast(0L)
+            lastSeenScrollbackSerial = buffer.scrollbackSerial
+            val wasAtBottom = viewport.scrollOffsetFromBottom == 0
+            val follow = scrollModel.onOutputPushed(
+                pushed.toInt(), wasAtBottom, changedSession.isRunning, buffer.usingAlt
+            )
+            // Follow disabled (or user away): hold the reading position against
+            // the freshly pushed rows. The viewport already compensates when it
+            // is displaced; this covers the anchored-but-not-following case.
+            if (!follow && pushed > 0 && viewport.scrollOffsetFromBottom == 0 && !buffer.usingAlt) {
+                viewport.scrollByRows(pushed.toInt(), buffer, rows)
+            }
+            if (selection != null && buffer.resolveSelection(selection!!) == null) {
                 selection = null
                 actionMode?.finish()
             }
@@ -454,11 +728,18 @@ class TerminalView @JvmOverloads constructor(
         draggingEndpoint = null
         touchScrollActive = false
         gesturePolicy.finish()
+        multiTouch.onEnd()
+        suppressSingleFingerUntilUp = false
         scroller.abortAnimation()
         stopEdgeAutoScroll()
         scrollPixelRemainder = 0f
+        searchMatches = emptyList()
+        searchIndex = -1
+        scrollModel.reset()
+        lastSeenScrollbackSerial = null
         synchronized(newSession.emulator) {
             viewport.attach(newSession.emulator.buffer, visibleRowCount(newSession.emulator.buffer))
+            lastSeenScrollbackSerial = newSession.emulator.buffer.scrollbackSerial
         }
         updateSize()
         notifyScrollState()
@@ -466,9 +747,24 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun setFontSizeSp(sp: Float) {
-        renderer.fontSizeSp = sp
+        val clamped = sp.coerceIn(minFontSizeSp, maxFontSizeSp)
+        if (renderer.fontSizeSp == clamped) return
+        renderer.fontSizeSp = clamped
         updateSize()
         invalidate()
+    }
+
+    fun currentFontSizeSp(): Float = renderer.fontSizeSp
+
+    fun nudgeFontSize(deltaSp: Float) {
+        val target = (renderer.fontSizeSp + deltaSp).coerceIn(minFontSizeSp, maxFontSizeSp)
+        setFontSizeSp(target)
+        onFontSizeChanged?.invoke(renderer.fontSizeSp)
+    }
+
+    fun resetFontSize() {
+        setFontSizeSp(DEFAULT_FONT_SIZE_SP)
+        onFontSizeChanged?.invoke(renderer.fontSizeSp)
     }
 
     fun showSoftInput() {
@@ -492,6 +788,20 @@ class TerminalView @JvmOverloads constructor(
         if (emu != null) synchronized(emu) {
             viewport.scrollToBottom(emu.buffer, visibleRowCount(emu.buffer))
         }
+        scrollModel.onUserScroll(true)
+        notifyScrollState()
+        invalidate()
+    }
+
+    /** Jumps to the oldest retained output row (Scroll to top). */
+    fun scrollToTop() {
+        scroller.abortAnimation()
+        val emu = session?.emulator ?: return
+        synchronized(emu) {
+            val rows = visibleRowCount(emu.buffer)
+            viewport.setOffsetFromBottom(emu.buffer.maxScrollOffset(rows), emu.buffer, rows)
+        }
+        scrollModel.onUserScroll(false)
         notifyScrollState()
         invalidate()
     }
@@ -523,7 +833,7 @@ class TerminalView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         renderer.densityScale = resources.displayMetrics.scaledDensity
         val emu = session?.emulator ?: run {
-            canvas.drawColor(0xff000000.toInt())
+            canvas.drawColor(renderer.theme.defaultBg)
             val pad = 16f * resources.displayMetrics.density
             canvas.drawText("Starting Noxs terminal…", pad, pad * 2f, placeholderPaint)
             return
@@ -535,6 +845,18 @@ class TerminalView @JvmOverloads constructor(
             val rows = visibleRowCount(emu.buffer)
             viewport.synchronize(emu.buffer, rows)
             renderer.scrollOffset = viewport.scrollOffsetFromBottom
+            val firstRow = emu.buffer.viewportStartDocumentRow(viewport.scrollOffsetFromBottom, rows)
+            val lastRow = firstRow + rows - 1
+            var visibleMatches: List<TerminalSearchMatch> = emptyList()
+            var currentMatch: TerminalSearchMatch? = null
+            if (searchMatches.isNotEmpty()) {
+                // Matches are ordered by row; binary-search the visible window.
+                val from = searchMatches.binarySearch { it.row.compareTo(firstRow) }
+                    .let { if (it < 0) -(it + 1) else it }
+                currentMatch = searchMatches.getOrNull(searchIndex)
+                val until = searchMatches.indexOfFirst(from, lastRow + 1)
+                if (from < until) visibleMatches = searchMatches.subList(from, until)
+            }
             renderer.render(
                 canvas,
                 emu,
@@ -542,9 +864,11 @@ class TerminalView @JvmOverloads constructor(
                 viewport.scrollOffsetFromBottom,
                 isFocusedVisual,
                 resources.displayMetrics.density,
-                selection
+                selection,
+                visibleMatches,
+                currentMatch
             )
-            if (viewport.scrollOffsetFromBottom == 0 && (cursorBlinkOn || !hasFocus())) {
+            if (viewport.scrollOffsetFromBottom == 0 && (cursorBlinkOn || !hasFocus() || !cursorBlinkEnabled)) {
                 renderer.drawCursor(canvas, emu, metrics)
             }
         }
@@ -559,6 +883,7 @@ class TerminalView @JvmOverloads constructor(
                 touchDownY = event.y
                 lastTouchY = event.y
                 touchScrollActive = false
+                suppressSingleFingerUntilUp = false
                 if (handle != null) {
                     scroller.abortAnimation()
                     draggingEndpoint = handle
@@ -579,14 +904,37 @@ class TerminalView @JvmOverloads constructor(
                 parent?.requestDisallowInterceptTouchEvent(false)
                 return gestureDetector.onTouchEvent(event)
             }
-            MotionEvent.ACTION_MOVE -> {
-                if (draggingEndpoint != null) {
-                    updatePointer(event.x, event.y)
-                    updateSelectionFromPointer(pointerX, pointerY)
-                    updateEdgeAutoScroll()
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger lands while a single-finger stream is active.
+                // Selection/handle ownership always wins; otherwise start the
+                // two-pointer decision (pinch vs two-finger scroll).
+                if (!selectionGesture && draggingEndpoint == null && event.pointerCount == 2) {
+                    scroller.abortAnimation()
+                    touchScrollActive = false
+                    val (cx, cy) = centroidOf(event)
+                    multiLastX = cx
+                    multiLastY = cy
+                    multiTouch.onBegin(spanOf(event))
+                }
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (multiTouch.active) {
+                    if (event.pointerCount - 1 <= 1) {
+                        multiTouch.onEnd()
+                        // The remaining finger must not become an instant
+                        // scroll or a phantom tap after a pinch/scroll.
+                        suppressSingleFingerUntilUp = true
+                        gesturePolicy.finish()
+                    }
                     return true
                 }
             }
+        }
+
+        // Two-pointer stream (pinch zoom / two-finger scroll)
+        if (multiTouch.active && event.pointerCount >= 2 && !selectionGesture && draggingEndpoint == null) {
+            return handleMultiTouchMove(event)
         }
 
         val handled = gestureDetector.onTouchEvent(event)
@@ -635,6 +983,13 @@ class TerminalView @JvmOverloads constructor(
             return true
         }
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            if (suppressSingleFingerUntilUp) {
+                suppressSingleFingerUntilUp = false
+                multiTouch.onEnd()
+                gesturePolicy.finish()
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
             touchScrollActive = false
             gesturePolicy.finish()
             parent?.requestDisallowInterceptTouchEvent(false)
@@ -649,7 +1004,7 @@ class TerminalView @JvmOverloads constructor(
         if (emu != null) synchronized(emu) {
             viewport.setOffsetFromBottom(scroller.currY, emu.buffer, visibleRowCount(emu.buffer))
         }
-        notifyScrollState()
+        markUserScroll()
         postInvalidateOnAnimation()
     }
 
@@ -658,20 +1013,20 @@ class TerminalView @JvmOverloads constructor(
         updateSize()
     }
 
-    override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: android.graphics.Rect?) {
+    override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
         isFocusedVisual = gainFocus
         cursorBlinkOn = true
         removeCallbacks(cursorBlinkRunnable)
-        if (gainFocus && isAttachedToWindow) postDelayed(cursorBlinkRunnable, CURSOR_BLINK_MS)
+        if (gainFocus && isAttachedToWindow) postDelayed(cursorBlinkRunnable, cursorBlinkPeriodMs)
         invalidate()
     }
 
     private fun updateSize() {
         renderer.densityScale = resources.displayMetrics.scaledDensity
         val m = renderer.measure().also { metrics = it }
-        val w = width.takeIf { it > 0 } ?: 720
-        val h = height.takeIf { it > 0 } ?: 1200
+        val w = contentWidthPx().takeIf { width > 0 } ?: 720f
+        val h = contentHeightPx().takeIf { height > 0 } ?: 1200f
         val cols = (w / m.charWidth).toInt().coerceAtLeast(4)
         val rows = (h / m.charHeight).toInt().coerceAtLeast(2)
         session?.resize(rows, cols)
@@ -689,7 +1044,7 @@ class TerminalView @JvmOverloads constructor(
         invalidate()
     }
 
-    override fun checkInputConnectionProxy(view: android.view.View): Boolean = true
+    override fun checkInputConnectionProxy(view: View): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT or
@@ -823,7 +1178,7 @@ class TerminalView @JvmOverloads constructor(
         super.onAttachedToWindow()
         renderer.densityScale = resources.displayMetrics.scaledDensity
         metrics = renderer.measure()
-        if (hasFocus()) postDelayed(cursorBlinkRunnable, CURSOR_BLINK_MS)
+        if (hasFocus()) postDelayed(cursorBlinkRunnable, cursorBlinkPeriodMs)
     }
 
     override fun onDetachedFromWindow() {
@@ -838,9 +1193,61 @@ class TerminalView @JvmOverloads constructor(
         const val CURSOR_BLINK_MS = 550L
         const val ACTION_COPY = 101
         const val ACTION_PASTE = 102
-        const val ACTION_MORE = 103
+        const val ACTION_SHARE = 103
+        const val ACTION_MORE = 104
         const val MORE_SELECT_ALL = 201
         const val MORE_COPY_ALL = 202
+        const val MORE_CLEAR_SCROLLBACK = 203
         const val HANDLE_HIT_RADIUS_DP = 28f
+        const val DEFAULT_FONT_SIZE_SP = 14f
+    }
+
+    /**
+     * Applies the persisted terminal appearance in one call. Every field takes
+     * effect live — no shell restart, no session loss. Font size is applied
+     * through the same clamped path pinch zoom uses.
+     */
+    fun applyAppearance(appearance: TerminalViewAppearance) {
+        renderer.theme = appearance.theme
+        renderer.fontFamily = appearance.fontFamily.typeface
+        renderer.lineSpacing = appearance.lineSpacing
+        renderer.letterSpacingEm = appearance.letterSpacingEm
+        renderer.cursorStyle = appearance.cursorStyle
+        renderer.cursorWidth = appearance.cursorWidth
+        renderer.contentPaddingPx = appearance.paddingDp * resources.displayMetrics.density
+        alpha = appearance.opacity
+        hapticsEnabled = appearance.haptics
+        longPressSelectionEnabled = appearance.longPressSelection
+        multiTouch.pinchZoomEnabled = appearance.pinchZoom
+        multiTouch.twoFingerScrollEnabled = appearance.twoFingerScroll
+        minFontSizeSp = appearance.minFontSizeSp
+        maxFontSizeSp = appearance.maxFontSizeSp
+        scrollModel.mode = appearance.scrollMode
+        scrollModel.followLiveOutput = appearance.followLiveOutput
+        scrollModel.showNewOutputIndicator = appearance.showNewOutputIndicator
+        scrollModel.autoFollowWhileRunning = appearance.autoFollowWhileRunning
+        scrollModel.reset()
+        cursorBlinkEnabled = appearance.cursorBlink
+        cursorBlinkPeriodMs = appearance.cursorBlinkPeriodMs
+        reduceAnimations = appearance.reduceAnimations
+        renderer.textAntialias = appearance.textAntialias
+        setFontSizeSp(appearance.fontSizeSp)
+        restartCursorBlink()
+    }
+
+    private fun restartCursorBlink() {
+        cursorBlinkOn = true
+        removeCallbacks(cursorBlinkRunnable)
+        if (isAttachedToWindow) postDelayed(cursorBlinkRunnable, cursorBlinkPeriodMs)
+        invalidate()
     }
 }
+
+private fun List<TerminalSearchMatch>.indexOfFirst(fromIndex: Int, rowBoundExclusive: Int): Int {
+    if (fromIndex >= size) return size
+    for (i in fromIndex until size) {
+        if (this[i].row >= rowBoundExclusive) return i
+    }
+    return size
+}
+

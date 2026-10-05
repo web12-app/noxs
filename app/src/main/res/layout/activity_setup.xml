@@ -29,6 +29,15 @@
             android:textSize="13sp" />
 
         <TextView
+            android:id="@+id/tv_setup_elapsed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text=""
+            android:textColor="@color/noxs_text_dim"
+            android:textSize="13sp" />
+
+        <TextView
             android:id="@+id/btn_stop"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

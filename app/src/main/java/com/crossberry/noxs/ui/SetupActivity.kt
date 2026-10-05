@@ -30,6 +30,7 @@ import com.crossberry.noxs.R
 import com.crossberry.noxs.databinding.ActivitySetupBinding
 import com.crossberry.noxs.runtime.NoxsService
 import com.crossberry.noxs.runtime.NoxsSetupSession
+import com.crossberry.noxs.runtime.SetupOpTracker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -38,6 +39,12 @@ class SetupActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySetupBinding
     private val session: NoxsSetupSession by lazy { (application as NoxsApplication).setupSession }
     private var transitionStarted = false
+
+    // Live long-running operation state (toolbar spinner + elapsed)
+    private var lastState: NoxsSetupSession.State = NoxsSetupSession.State.IDLE
+    private var liveOpName: String = ""
+    private var liveOpAnchorMs = 0L
+    private var awaitingPasswordPhase = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,13 +85,35 @@ class SetupActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { session.state.collect { render(it) } }
+                launch { session.state.collect { state ->
+                    lastState = state
+                    render(state)
+                    refreshToolbar()
+                } }
                 launch {
                     session.passwordPhase.collect { phase ->
+                        awaitingPasswordPhase = phase
                         binding.tvPasswordPrompt.text = getString(
                             if (phase == 2) R.string.setup_password_confirm else R.string.setup_password_enter
                         )
                         if (phase == 1) binding.etPassword.setText("")
+                    }
+                }
+                launch {
+                    session.liveOp.collect { op ->
+                        liveOpName = op?.name.orEmpty()
+                        liveOpAnchorMs = op?.startedAtElapsedRealtimeMs ?: 0L
+                        refreshToolbar()
+                    }
+                }
+                // Presentation ticker: spinner ~10 Hz, elapsed 1 Hz. Lifecycle-
+                // aware, cancelled automatically on STOP/destroy — the setup
+                // process itself keeps running (monotonic clock keeps time).
+                launch {
+                    while (true) {
+                        session.tickLiveLine()
+                        refreshToolbar()
+                        delay(100)
                     }
                 }
             }
@@ -138,6 +167,32 @@ class SetupActivity : AppCompatActivity() {
     private fun showKeyboard() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.showSoftInput(binding.etPassword, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    /**
+     * Slim toolbar state: `⠋ Checking interrupted dpkg configuration  00:47`
+     * while an operation runs; the state chip otherwise. Presentation only —
+     * the terminal itself carries the real output.
+     */
+    private fun refreshToolbar() {
+        if (liveOpName.isEmpty()) {
+            binding.tvSetupElapsed.text = ""
+            binding.tvSetupStatus.text = when (lastState) {
+                NoxsSetupSession.State.IDLE -> getString(R.string.setup_status_idle)
+                NoxsSetupSession.State.AWAITING_PASSWORD -> getString(R.string.setup_status_awaiting)
+                NoxsSetupSession.State.RUNNING -> getString(R.string.setup_status_running)
+                NoxsSetupSession.State.COMPLETED -> getString(R.string.setup_status_completed)
+                NoxsSetupSession.State.REPAIRING -> getString(R.string.setup_status_repairing)
+                NoxsSetupSession.State.FAILED -> getString(R.string.setup_status_failed)
+                NoxsSetupSession.State.CANCELLED -> getString(R.string.setup_status_stopped)
+            }
+            return
+        }
+        val elapsed = android.os.SystemClock.elapsedRealtime() - liveOpAnchorMs
+        val frames = SetupOpTracker.FRAMES
+        val frame = frames[(((elapsed / SetupOpTracker.SPINNER_PERIOD_MS) % frames.size).toInt())]
+        binding.tvSetupStatus.text = getString(R.string.setup_toolbar_operation, frame, liveOpName)
+        binding.tvSetupElapsed.text = SetupOpTracker.formatElapsed(elapsed)
     }
 
     private fun submitPassword() {

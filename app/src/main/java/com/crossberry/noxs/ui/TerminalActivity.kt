@@ -15,9 +15,12 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.FileObserver
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResult
@@ -72,6 +75,14 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     )
 
     private var current: NoxsSessionManager.Entry? = null
+
+    // Terminal settings (terminal.* keys) — applied live, no shell restart
+    private var terminalSettings: TerminalSettings = TerminalSettings()
+    private val scrollOffsets = mutableMapOf<String, Int>()
+    private val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val searchRunnable = Runnable {
+        binding.terminal.setSearchQuery(binding.etSearch.text?.toString().orEmpty())
+    }
 
     // One-shot guard: the background APT repair failure toast is shown once
     // per resumed session, never per state re-emission.
@@ -183,11 +194,20 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.btnTerminalLatest.setOnClickListener { binding.terminal.scrollToBottom() }
         binding.extraKeys.terminalView = binding.terminal
 
+        // Terminal UX upgrade: persisted settings, toolbar, search, indicator
+        applyTerminalSettings()
+        wireTerminalToolbar()
+        wireSearchBar()
+        binding.terminal.onIndicatorChanged = { label ->
+            binding.btnTerminalLatest.text = label?.let { "↓ $it" } ?: getString(R.string.terminal_latest)
+        }
+
         // Status widget ticker
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     refreshStatus()
+                    renderSessionStatus()
                     delay(5000)
                 }
             }
@@ -344,9 +364,134 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.terminal.attach(entry.session)
         binding.statusSession.text = entry.label + (if (entry.loginAsRoot) " ▸ ${getString(R.string.session_root_badge)}" else "")
         attachedAtMs = System.currentTimeMillis()
+        // Live settings: scrollback capacity + preserved reading position.
+        binding.terminal.applyAppearance(terminalSettings.toAppearance())
+        runCatching { entry.session.emulator.setScrollbackLimit(terminalSettings.scrollbackLines) }
         binding.terminal.post {
-            binding.terminal.requestFocus()
-            binding.terminal.showSoftInput()
+            if (terminalSettings.preserveScrollPosition) {
+                scrollOffsets[entry.label]?.let { binding.terminal.restoreScrollOffset(it) }
+            }
+            if (terminalSettings.autoFocusTerminal) {
+                binding.terminal.requestFocus()
+                binding.terminal.showSoftInput()
+            }
+        }
+        renderSessionStatus()
+    }
+
+    /** Loads terminal.* settings and applies them to the live view. */
+    private fun applyTerminalSettings() {
+        terminalSettings = TerminalSettingsStore.load(AndroidTerminalPrefs.from(this))
+        binding.terminal.applyAppearance(terminalSettings.toAppearance())
+        binding.terminal.onFontSizeChanged = { sp ->
+            TerminalSettingsStore.putInt(AndroidTerminalPrefs.from(this), "terminal.fontSize", sp.toInt())
+            binding.fontSizeLabel.text = "${sp.toInt()}"
+        }
+        binding.fontSizeLabel.text = "${terminalSettings.fontSizeSp}"
+        binding.terminalToolbarScroll.visibility =
+            if (terminalSettings.showToolbar) View.VISIBLE else View.GONE
+        current?.session?.let { runCatching { it.emulator.setScrollbackLimit(terminalSettings.scrollbackLines) } }
+    }
+
+    private fun wireTerminalToolbar() {
+        binding.btnScrollTop.setOnClickListener { binding.terminal.scrollToTop() }
+        binding.btnScrollBottom.setOnClickListener { binding.terminal.scrollToBottom() }
+        binding.btnTbCopy.setOnClickListener { copyTerminalText() }
+        binding.btnTbPaste.setOnClickListener { pasteIntoShell() }
+        binding.btnTbSearch.setOnClickListener { toggleSearchBar() }
+        binding.btnFontDecr.setOnClickListener { binding.terminal.nudgeFontSize(-1f) }
+        binding.btnFontIncr.setOnClickListener { binding.terminal.nudgeFontSize(1f) }
+        binding.fontSizeLabel.setOnClickListener { binding.terminal.resetFontSize() }
+        binding.btnTbMore.setOnClickListener { showTerminalMoreMenu(it) }
+    }
+
+    private fun wireSearchBar() {
+        binding.etSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                // Debounced: large scrollbacks must not be re-scanned per keystroke.
+                searchHandler.removeCallbacks(searchRunnable)
+                searchHandler.postDelayed(searchRunnable, 250)
+            }
+        })
+        binding.btnSearchPrev.setOnClickListener { binding.terminal.searchPreviousMatch() }
+        binding.btnSearchNext.setOnClickListener { binding.terminal.searchNextMatch() }
+        binding.btnSearchClose.setOnClickListener { closeSearchBar() }
+        binding.terminal.onSearchResult = { count, index ->
+            binding.tvSearchCount.text = if (count <= 0) "" else "${index + 1}/$count"
+        }
+    }
+
+    private fun toggleSearchBar() {
+        if (binding.searchBar.visibility == View.VISIBLE) closeSearchBar() else openSearchBar()
+    }
+
+    private fun openSearchBar() {
+        binding.searchBar.visibility = View.VISIBLE
+        binding.etSearch.requestFocus()
+    }
+
+    private fun closeSearchBar() {
+        searchHandler.removeCallbacks(searchRunnable)
+        binding.searchBar.visibility = View.GONE
+        binding.tvSearchCount.text = ""
+        binding.terminal.clearSearch()
+    }
+
+    private fun showTerminalMoreMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, MORE_CLEAR_SCROLLBACK, 0, getString(R.string.terminal_menu_clear_scrollback))
+        popup.menu.add(0, MORE_SAVE_OUTPUT, 1, getString(R.string.terminal_menu_save_output))
+        popup.menu.add(0, MORE_RESET_FONT, 2, getString(R.string.terminal_menu_reset_font))
+        popup.menu.add(0, MORE_SETTINGS, 3, getString(R.string.nav_settings))
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                MORE_CLEAR_SCROLLBACK -> {
+                    binding.terminal.clearScrollback()
+                    true
+                }
+                MORE_SAVE_OUTPUT -> {
+                    saveTerminalOutput()
+                    true
+                }
+                MORE_RESET_FONT -> {
+                    binding.terminal.resetFontSize()
+                    true
+                }
+                MORE_SETTINGS -> {
+                    startActivity(Intent(this, TerminalSettingsActivity::class.java))
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
+    }
+
+    /** Shares the full transcript through the system share sheet. */
+    private fun saveTerminalOutput() {
+        val text = binding.terminal.selectionOrTranscriptText()
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.terminal_menu_save_output))
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        runCatching { startActivity(Intent.createChooser(send, null)) }
+            .onFailure { Toast.makeText(this, R.string.err_generic, Toast.LENGTH_SHORT).show() }
+    }
+
+    /** Subtle session/process status: ● RUNNING / ○ IDLE / ✓ EXITED / ✗ FAILED. */
+    private fun renderSessionStatus() {
+        val session = current?.session
+        binding.statusProc.text = when {
+            session == null -> ""
+            session.isRunning && session.lastOutputAtMs > 0 &&
+                System.currentTimeMillis() - session.lastOutputAtMs < 10_000L ->
+                getString(R.string.status_proc_running, session.label, session.pid)
+            session.isRunning -> getString(R.string.status_proc_idle, session.label, session.pid)
+            session.exitCode == 0 -> getString(R.string.status_proc_exited, session.exitCode)
+            else -> getString(R.string.status_proc_failed, session.exitCode)
         }
     }
 
@@ -378,6 +523,8 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     }
 
     override fun onStop() {
+        // Preserve the reading position across backgrounding/recreation.
+        current?.let { scrollOffsets[it.label] = binding.terminal.currentScrollOffset() }
         storageObserver?.stopWatching()
         storageObserver = null
         storageObservedPath = null
@@ -848,6 +995,15 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     override fun onBackPressed() {
         if (binding.drawer.isDrawerOpen(GravityCompat.START)) {
             binding.drawer.closeDrawer(GravityCompat.START)
+        } else if (terminalSettings.confirmExit &&
+            sessionManager?.sessions?.value?.any { it.session.isRunning } == true
+        ) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.terminal_exit_title)
+                .setMessage(R.string.terminal_exit_msg)
+                .setPositiveButton(R.string.action_confirm) { _, _ -> finishAffinity() }
+                .setNegativeButton(R.string.action_cancel, null)
+                .show()
         } else {
             super.onBackPressed()
         }
@@ -861,5 +1017,9 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         const val WEBSITE_URL = "https://crossberry.vercel.app"
         const val SUPPORT_EMAIL = "mailto:crossberryweb@gmail.com"
         const val SHUTDOWN_GRACE_MS = 3_000L
+        const val MORE_CLEAR_SCROLLBACK = 301
+        const val MORE_SAVE_OUTPUT = 302
+        const val MORE_RESET_FONT = 303
+        const val MORE_SETTINGS = 304
     }
 }

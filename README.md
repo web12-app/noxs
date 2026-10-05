@@ -49,7 +49,7 @@ noxs/
 ├── sandbox/                sandbox docs (filesystem, users, permissions, sessions)
 ├── packages/               apt config, manifest schema, repository references
 ├── scripts/                bootstrap.sh · build-rootfs.sh · package.sh · test.sh
-├── docs/                   ARCHITECTURE · BOOTSTRAP · ACTIVITY-CENTER · SECURITY ·
+├── docs/                   ARCHITECTURE · BOOTSTRAP · ACTIVITY-CENTER · TERMINAL-UX · SECURITY ·
 │                           TESTING · UNIX-SOCKETS · FAQ
 ├── .github/workflows/      android-ci.yml (build + validate + release)
 └── LICENSE, NOTICE.md      Apache-2.0
@@ -86,6 +86,16 @@ what is running (with progress) and offers Open / Stop; the in-app Activity
 Center and floating status panel give full control. `exit` closes only the
 current shell — Noxs shuts down only when the last shell exits with no
 background work left. Details: [docs/ACTIVITY-CENTER.md](docs/ACTIVITY-CENTER.md).
+
+## Terminal UX
+
+Real terminal behavior, real gestures: setup runs as live long-running
+operations with an in-place spinner and a truthful monotonic elapsed timer;
+pinch-to-zoom (10–28 sp), Smart/History scroll modes with a "↓ N new lines"
+indicator, bounded resizable scrollback (10,000 lines default), full-document
+search, a compact toolbar and a complete Settings → Terminal surface
+(Appearance / Interaction / Scrolling / Behavior / Advanced). All settings
+apply live — no shell restart. Details: [docs/TERMINAL-UX.md](docs/TERMINAL-UX.md).
 
 ## Security posture
 

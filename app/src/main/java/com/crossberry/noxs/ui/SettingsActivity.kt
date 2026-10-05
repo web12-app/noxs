@@ -84,6 +84,15 @@ class SettingsActivity : AppCompatActivity() {
         fun switch(initial: Boolean, onChange: (Boolean) -> Unit): SwitchMaterial =
             SwitchMaterial(this).apply { isChecked = initial; setOnCheckedChangeListener { _, c -> onChange(c) } }
 
+        // Terminal hub (Appearance / Interaction / Scrolling / Behavior / Advanced)
+        stack.addView(label(getString(R.string.settings_section_terminal)))
+        stack.addView(SettingsWidgets.valueRow(
+            this,
+            getString(R.string.settings_terminal_title),
+            getString(R.string.settings_terminal_entry_desc),
+            TerminalSettingsStore.load(AndroidTerminalPrefs.from(this)).let { "${it.fontSizeSp} sp · ${it.scrollMode.label}" }
+        ) { startActivity(android.content.Intent(this, TerminalSettingsActivity::class.java)) })
+
         // Terminal behavior
         addRow(
             getString(R.string.settings_extra_keys),

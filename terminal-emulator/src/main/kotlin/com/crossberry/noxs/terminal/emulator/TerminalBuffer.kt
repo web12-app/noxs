@@ -6,7 +6,8 @@ package com.crossberry.noxs.terminal.emulator
 
 class TerminalBuffer(initialCols: Int, initialRows: Int, scrollbackMax: Int) {
 
-    val scrollbackMax: Int = scrollbackMax.coerceAtLeast(0)
+    var scrollbackMax: Int = scrollbackMax.coerceAtLeast(0)
+        private set
     private var nextLineIdentity = 1L
 
     inner class Line(initialCols: Int) {
@@ -57,10 +58,10 @@ class TerminalBuffer(initialCols: Int, initialRows: Int, scrollbackMax: Int) {
 
     // Fixed-capacity ring: visible-row lookup stays O(1), even with thousands
     // of history lines. Rows retain their identity as they enter scrollback.
-    private val scrollbackRing: Array<Line?> = arrayOfNulls(this.scrollbackMax)
+    private var scrollbackRing: Array<Line?> = arrayOfNulls(this.scrollbackMax)
     private var scrollbackHead = 0
     private var scrollbackCount = 0
-    private val scrollbackSlotsByIdentity = HashMap<Long, Int>(this.scrollbackMax.coerceAtLeast(16))
+    private var scrollbackSlotsByIdentity = HashMap<Long, Int>(this.scrollbackMax.coerceAtLeast(16))
     val scrollbackSize: Int get() = scrollbackCount
 
     /** Monotonic count used by the viewport to hold its position during output. */
@@ -142,6 +143,35 @@ class TerminalBuffer(initialCols: Int, initialRows: Int, scrollbackMax: Int) {
         scrollbackSlotsByIdentity.clear()
         scrollbackHead = 0
         scrollbackCount = 0
+    }
+
+    /**
+     * Grows or shrinks the history ring in place. The screen, cursor, VT state
+     * and the child process are untouched; shrinking keeps the NEWEST retained
+     * rows and drops only the oldest. Growing preserves every row and order.
+     * No-op when the requested capacity equals the current one.
+     */
+    fun resizeScrollback(newMax: Int) {
+        val target = newMax.coerceAtLeast(0)
+        if (target == scrollbackMax) return
+        val oldCount = scrollbackCount
+        val keep = if (target == 0) 0 else minOf(oldCount, target)
+        val fresh = arrayOfNulls<Line>(target)
+        val slots = HashMap<Long, Int>(target.coerceAtLeast(16))
+        if (keep > 0) {
+            // Copy the newest [keep] rows, oldest-to-newest, into slots 0..keep-1.
+            val firstKeptOldest = oldCount - keep
+            for (i in 0 until keep) {
+                val line = scrollbackLineFromOldest(firstKeptOldest + i) ?: continue
+                fresh[i] = line
+                slots[line.identity] = i
+            }
+        }
+        scrollbackRing = fresh
+        scrollbackSlotsByIdentity = slots
+        scrollbackHead = 0
+        scrollbackCount = keep
+        scrollbackMax = target
     }
 
     /** Number of document rows currently addressable by viewport/selection. */

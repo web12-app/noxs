@@ -61,16 +61,19 @@ class NoxsSetupSession(
     @Volatile
     var onViewChanged: (() -> Unit)? = null
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Current long-running operation for the slim toolbar (spinner + name + elapsed). */
+    data class LiveOp(val name: String, val startedAtElapsedRealtimeMs: Long)
 
-    @Volatile
-    private var cancelRequested = false
+    private val _liveOp = MutableStateFlow<LiveOp?>(null)
+    val liveOp: StateFlow<LiveOp?> = _liveOp
 
-    /** Held only in memory until chpasswd consumes it; wiped right after. */
-    @Volatile
-    private var password: CharArray? = null
+    /** Presentation-only tracker; never touches installer state or logs. */
+    private val opTracker = SetupOpTracker()
 
     private var liveLineActive = false
+    private var liveLineIsSpinner = false
+    private var lastSpinnerFrame = ' '
+    private var lastElapsedSeconds = -1L
     private var lastLiveRenderMs = 0L
     private var lastCenterProgressMs = 0L
     private var setupActivityId: String? = null
@@ -101,6 +104,7 @@ class NoxsSetupSession(
     private fun endLiveLine(suffix: String = "") {
         if (!liveLineActive) return
         liveLineActive = false
+        liveLineIsSpinner = false
         console(suffix + "\r\n")
     }
 
@@ -108,21 +112,115 @@ class NoxsSetupSession(
         val pad = (CONSOLE_WIDTH - plain.length).coerceAtLeast(0)
         console("\r" + ansi + " ".repeat(pad))
         liveLineActive = true
+        liveLineIsSpinner = false
     }
 
-    private fun stepPhrase(step: Int): String = when (step) {
-        1 -> "Preparing Linux environment..."
-        2 -> "Checking filesystem..."
-        3 -> "Checking setup..."
-        4 -> "Preparing your environment..."
-        5 -> "Downloading Debian 12 Bookworm..."
-        6 -> "Extracting filesystem..."
-        7 -> "Setting up your environment..."
-        8 -> "Creating Linux account..."
-        9 -> "Preparing workspace..."
-        10 -> "Preparing secure connections..."
-        11 -> "Finalizing environment..."
-        else -> "Working..."
+    // ------------------------------------------------- live operation line
+
+    private fun stepOpName(step: Int): String = when (step) {
+        1 -> "Preparing environment"
+        2 -> "Verifying filesystem"
+        3 -> "Preparing workspace"
+        4 -> "Preparing environment"
+        5 -> "Downloading Debian 12 Bookworm"
+        6 -> "Extracting rootfs"
+        7 -> "Preparing environment"
+        8 -> "Creating Linux account"
+        9 -> "Preparing workspace"
+        10 -> "Preparing secure connections"
+        11 -> "Preparing environment"
+        else -> "Working"
+    }
+
+    /** Maps REAL bootstrapper phase lines onto live operations; null = plain log. */
+    private fun opForLogLine(line: String): String? {
+        val lower = line.lowercase(Locale.US)
+        return when {
+            lower.contains("checking for interrupted dpkg configuration") ->
+                "Checking for interrupted dpkg configuration"
+            lower.contains("refreshing signed debian package metadata") ->
+                "Refreshing signed Debian package metadata"
+            lower.contains("installing or repairing ca-certificates") ->
+                "Installing or repairing ca-certificates"
+            lower.contains("archive keyring") ->
+                "Installing Debian archive keyring"
+            lower.contains("finishing interrupted package configuration") ||
+                lower.contains("retrying dpkg configuration") ->
+                "Repairing pending dpkg configuration"
+            lower.contains("package dependencies") ->
+                "Installing required packages"
+            else -> null
+        }
+    }
+
+    /** Starts an operation; spinner ops rewrite one console line in place. */
+    private fun startOp(name: String, withSpinnerLine: Boolean) {
+        opTracker.start(name)
+        _liveOp.value = LiveOp(name, android.os.SystemClock.elapsedRealtime())
+        lastSpinnerFrame = ' '
+        lastElapsedSeconds = -1L
+        lastLiveRenderMs = 0L
+        if (withSpinnerLine) {
+            writeOpLine(name, opTracker.spinnerFrame(), SetupOpTracker.formatElapsed(0L))
+        } else {
+            // Steps 5/6 stream their own REAL progress (bytes / tar entries).
+            console("\u001b[1;32m[ Noxs ]\u001b[0m $name ")
+        }
+    }
+
+    private fun writeOpLine(name: String, frame: Char, elapsed: String) {
+        // \r + EL: the line updates in place — no new lines are created.
+        console("\r\u001b[1;32m[ Noxs ]\u001b[0m $frame $name  $elapsed\u001b[K")
+        liveLineActive = true
+        liveLineIsSpinner = true
+    }
+
+    /**
+     * UI-driven tick (~8–12 Hz while the console is visible): refreshes the
+     * spinner frame and the 1 Hz elapsed counter in place. When the app is
+     * backgrounded nothing ticks — the monotonic clock guarantees the elapsed
+     * time shown when ticking resumes is still truthful.
+     */
+    fun tickLiveLine() {
+        val op = opTracker.current ?: return
+        val hintDue = opTracker.consumeLongOpHint()
+        val frame = opTracker.spinnerFrame()
+        val seconds = opTracker.elapsedMs() / 1000L
+        if (frame == lastSpinnerFrame && seconds == lastElapsedSeconds && !hintDue) return
+        if (hintDue) {
+            // Bake the current line so the hint lands below it — long duration
+            // is never treated as an error.
+            console("\r\n\u001b[90m[ noxs ] Still working — this operation may take a little longer.\u001b[0m\r\n")
+            liveLineActive = false
+            lastElapsedSeconds = -1L
+        }
+        lastSpinnerFrame = frame
+        lastElapsedSeconds = seconds
+        writeOpLine(op.name, frame, SetupOpTracker.formatElapsed(opTracker.elapsedMs()))
+    }
+
+    /** Bakes the live line as a ✓/✗ record carrying the real elapsed time. */
+    private fun closeOpLine(success: Boolean) {
+        val done = opTracker.finish(success)
+        if (liveLineActive && liveLineIsSpinner && done != null) {
+            val mark = if (success) "✓" else "✗"
+            val color = if (success) "1;32" else "1;31"
+            console("\r\u001b[${color}m[ Noxs ]\u001b[0m $mark ${done.name}  ${SetupOpTracker.formatElapsed(done.finalMs)}\u001b[K\r\n")
+        } else if (liveLineActive) {
+            console("\r\n")
+        }
+        liveLineActive = false
+        liveLineIsSpinner = false
+        _liveOp.value = null
+    }
+
+    /** Plain bake for user-cancelled operations (the ^C note explains itself). */
+    private fun abandonOpLine() {
+        if (liveLineActive) console("\r\n")
+        liveLineActive = false
+        liveLineIsSpinner = false
+        opTracker.finish(false)
+        _liveOp.value = null
     }
 
     private fun renderStep(step: Int) {
@@ -133,12 +231,15 @@ class NoxsSetupSession(
         currentStep = step
         NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
             NoxsSetupEventLog.STEP_STARTED, step, System.currentTimeMillis() - startedAtMs.get()))
-        setupActivityId?.let { center?.attachOutput(it, stepPhrase(step)) }
-        endLiveLine(" \u001b[1;32mok\u001b[0m")
-        lastLiveRenderMs = 0L // next live tick renders immediately
-        val phrase = "\u001b[1;32m[ Noxs ]\u001b[0m " + stepPhrase(step)
-        // Steps 5 and 6 stream live progress on the same line.
-        console(phrase + if (step == 5 || step == 6) " " else "\r\n")
+        setupActivityId?.let { center?.attachOutput(it, stepOpName(step)) }
+        // Close the previous live line: a spinner op becomes a ✓ record;
+        // download/extract lines already baked their own success suffix.
+        if (liveLineActive && !liveLineIsSpinner) {
+            endLiveLine(" \u001b[1;32mok\u001b[0m")
+        } else {
+            closeOpLine(success = true)
+        }
+        startOp(stepOpName(step), withSpinnerLine = step != 5 && step != 6)
     }
 
     private fun renderDownload(doneBytes: Long, totalBytes: Long) {
@@ -245,6 +346,11 @@ class NoxsSetupSession(
         _state.value = State.RUNNING
         startedAtMs.set(System.currentTimeMillis())
         currentStep = 0
+        _liveOp.value = null
+        liveLineActive = false
+        liveLineIsSpinner = false
+        lastSpinnerFrame = ' '
+        lastElapsedSeconds = -1L
         val hasPartial = paths.cache.listFiles()
             ?.any { it.isFile && it.name.endsWith(".part") && it.length() > 1_000_000L } == true
         NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
@@ -273,7 +379,7 @@ class NoxsSetupSession(
             }
             when (result) {
                 is NoxsInstaller.InstallResult.Success -> {
-                    endLiveLine()
+                    closeOpLine(success = true)
                     NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
                         NoxsSetupEventLog.COMPLETED, elapsedMs = System.currentTimeMillis() - startedAtMs.get()))
                     setupActivityId?.let { center?.markCompleted(it) }
@@ -284,7 +390,7 @@ class NoxsSetupSession(
                 is NoxsInstaller.InstallResult.Failure -> {
                     failureDetail = result.detail
                     failureHintRes = result.userMessageRes
-                    endLiveLine()
+                    closeOpLine(success = false)
                     NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
                         NoxsSetupEventLog.FAILED, currentStep.takeIf { it > 0 },
                         System.currentTimeMillis() - startedAtMs.get(),
@@ -300,7 +406,7 @@ class NoxsSetupSession(
                     _state.value = State.FAILED
                 }
                 is NoxsInstaller.InstallResult.Cancelled -> {
-                    endLiveLine()
+                    abandonOpLine()
                     NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
                         NoxsSetupEventLog.CANCELLED, currentStep.takeIf { it > 0 },
                         System.currentTimeMillis() - startedAtMs.get()))
@@ -397,8 +503,26 @@ class NoxsSetupSession(
         override fun onProgressBytes(downloaded: Long, total: Long) = renderDownload(downloaded, total)
         override fun onExtracted(entries: Long) = renderExtract(entries)
         override fun onLog(line: String) {
-            endLiveLine()
+            // Real phase lines become live operations (spinner + elapsed);
+            // everything else streams as a dim, verbatim log line.
+            val opName = opForLogLine(line)
+            if (opName != null) {
+                closeOpLine(success = true)
+                startOp(opName, withSpinnerLine = true)
+                return
+            }
+            val hadSpinner = liveLineActive && liveLineIsSpinner
+            if (hadSpinner) {
+                // Bake the spinner line so the real output lands below it.
+                console("\r\n")
+                liveLineActive = false
+            }
             console("\u001b[90m[ noxs ]\u001b[0m $line\r\n")
+            if (hadSpinner && opTracker.current != null) {
+                // Continue ticking the same operation below the log line.
+                lastElapsedSeconds = -1L
+                tickLiveLine()
+            }
         }
         override fun onPasswordRequired(): CharArray? {
             val pw = password

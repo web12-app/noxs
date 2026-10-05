@@ -70,7 +70,7 @@ class TerminalEmulator(
     }
 
     companion object {
-        const val NoxsScrollbackDefault = 5000
+        const val NoxsScrollbackDefault = 10000
         private const val BEL = 0x07
         private const val BS = 0x08
         private const val HT = 0x09
@@ -108,6 +108,16 @@ class TerminalEmulator(
         pendingWide = false
         activeHyperlink = null
         promptActive = false
+    }
+
+    /**
+     * Applies a new scrollback capacity live (settings change) without
+     * touching the screen, VT state or the child process.
+     */
+    @Synchronized
+    fun setScrollbackLimit(maxLines: Int) {
+        buffer.resizeScrollback(maxLines)
+        client.onScreenChanged()
     }
 
     // ------------------------------------------------------------------ input

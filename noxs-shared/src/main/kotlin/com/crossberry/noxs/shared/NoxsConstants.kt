@@ -45,7 +45,7 @@ object NoxsConstants {
     const val MAX_ROOTFS_BYTES: Long = 6L * 1024 * 1024 * 1024
 
     /** Default scrollback lines. */
-    const val DEFAULT_SCROLLBACK = 5000
+    const val DEFAULT_SCROLLBACK = 10000
 
     // ---- Android-side (app-private) relative paths under filesDir ----
     const val ANDROID_BASE_DIR = "noxs"

@@ -101,6 +101,15 @@
             android:label="@string/title_settings" />
 
         <activity
+            android:name=".ui.TerminalSettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_terminal_title" />
+
+        <activity
+            android:name=".ui.TerminalSettingsSubActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.DiagnosticsActivity"
             android:exported="false"
             android:label="@string/title_diagnostics" />

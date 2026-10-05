@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val noxsVersionName = providers.gradleProperty("noxsVersionName").orElse("0.2.0").get()
-val noxsVersionCode = providers.gradleProperty("noxsVersionCode").orElse("2000").get().toInt()
+val noxsVersionName = providers.gradleProperty("noxsVersionName").orElse("0.3.0").get()
+val noxsVersionCode = providers.gradleProperty("noxsVersionCode").orElse("3000").get().toInt()
 
 android {
     namespace = "com.crossberry.noxs"
