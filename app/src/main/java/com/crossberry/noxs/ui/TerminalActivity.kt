@@ -29,21 +29,29 @@ import androidx.core.view.GravityCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.crossberry.noxs.NoxsApplication
 import com.crossberry.noxs.R
 import com.crossberry.noxs.databinding.ActivityTerminalBinding
+import com.crossberry.noxs.runtime.AndroidProcSource
+import com.crossberry.noxs.runtime.NoxsActivityCenter
+import com.crossberry.noxs.runtime.NoxsActivityRecord
 import com.crossberry.noxs.runtime.NoxsAptBootstrapper
 import com.crossberry.noxs.runtime.NoxsPaths
+import com.crossberry.noxs.runtime.NoxsProcSampler
 import com.crossberry.noxs.runtime.NoxsResources
 import com.crossberry.noxs.runtime.NoxsRuntimeFactory
 import com.crossberry.noxs.runtime.NoxsService
 import com.crossberry.noxs.runtime.NoxsSessionManager
 import com.crossberry.noxs.runtime.NoxsStorageBridge
+import com.crossberry.noxs.runtime.NoxsTreeUsage
 import com.crossberry.noxs.runtime.RootfsConfigurator
 import com.crossberry.noxs.runtime.RuntimeHolder
 import com.crossberry.noxs.terminal.emulator.TerminalSession
 import com.crossberry.noxs.terminal.emulator.TerminalSessionClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -74,6 +82,14 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     // Nullable (not lateinit): adoptRuntimeNow() collects the sessions StateFlow,
     // which can emit synchronously during onCreate before/around adapter binding.
     private var sessionAdapter: TwoLineAdapter? = null
+
+    // Background Activity Center integration
+    private val activityCenter: NoxsActivityCenter
+        get() = (application as NoxsApplication).activityCenter
+    private val procSampler by lazy { NoxsProcSampler(AndroidProcSource()) }
+    private var floatingPanel: FloatingStatusPanel? = null
+    private var panelJob: Job? = null
+    private var attachedAtMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,6 +136,14 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         // Visible Action Bar buttons
         binding.btnActionNewShell.setOnClickListener { newSession(root = false) }
         binding.btnActionNewRoot.setOnClickListener { newSession(root = true) }
+        binding.btnActionActivity.setOnClickListener { startActivity(Intent(this, ActivityCenterActivity::class.java)) }
+        binding.btnActionActivity.setOnLongClickListener {
+            val id = current?.activityId
+            if (id != null) toggleFloatingPanel(id) else {
+                Toast.makeText(this, R.string.activity_none, Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
         binding.btnActionCopy.setOnClickListener { copyTerminalText() }
         binding.btnActionPaste.setOnClickListener { pasteIntoShell() }
         binding.btnActionClear.setOnClickListener { clearTerminal() }
@@ -135,6 +159,7 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
             binding.navFiles to FileBrowserActivity::class.java,
             binding.navPackages to PackageManagerActivity::class.java,
             binding.navUsers to UserManagerActivity::class.java,
+            binding.navActivity to ActivityCenterActivity::class.java,
             binding.navProcesses to ProcessManagerActivity::class.java,
             binding.navServices to ServiceManagerActivity::class.java,
             binding.navEnv to EnvVarsActivity::class.java,
@@ -179,6 +204,24 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
             fulfillAutoCreateIfReady()
         }
         startAptInitialization()
+        onNewIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        // Notification "Open" lands here: focus the tapped activity and raise
+        // the floating status panel over the terminal.
+        intent?.getStringExtra(NoxsService.EXTRA_FOCUS_ACTIVITY)?.let { activityId ->
+            val record = activityCenter.find(activityId)
+            val session = record?.sessionId?.let { label ->
+                sessionManager?.sessions?.value?.firstOrNull { it.label == label }
+            }
+            if (session != null) {
+                current = session
+                attachCurrent()
+            }
+            showFloatingPanel(activityId)
+        }
     }
 
     private var autoCreatePending = false
@@ -319,6 +362,7 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         val entry = current ?: return
         binding.terminal.attach(entry.session)
         binding.statusSession.text = entry.label + (if (entry.loginAsRoot) " ▸ ${getString(R.string.session_root_badge)}" else "")
+        attachedAtMs = System.currentTimeMillis()
         binding.terminal.post {
             binding.terminal.requestFocus()
             binding.terminal.showSoftInput()
@@ -657,6 +701,121 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.statusStorage.text = getString(R.string.status_storage, usage.storageUsedMb.toString())
     }
 
+    // ---- Background Activity Center: floating status panel ----
+
+    private fun toggleFloatingPanel(activityId: String) {
+        if (floatingPanel != null && floatingPanel?.visibility == View.VISIBLE) {
+            hideFloatingPanel()
+        } else {
+            showFloatingPanel(activityId)
+        }
+    }
+
+    private fun showFloatingPanel(activityId: String) {
+        val record = activityCenter.find(activityId) ?: run {
+            Toast.makeText(this, R.string.activity_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val existing = floatingPanel
+        val panel = existing ?: FloatingStatusPanel(this).also { created ->
+            floatingPanel = created
+            binding.terminalContainer.addView(created)
+            created.onTerminal = {
+                val rec = activityCenter.find(activityId)
+                val entry = rec?.sessionId?.let { label ->
+                    sessionManager?.sessions?.value?.firstOrNull { it.label == label }
+                }
+                if (entry != null) {
+                    current = entry
+                    attachCurrent()
+                }
+                hideFloatingPanel()
+            }
+            created.onLogs = { showPanelLogs(activityId) }
+            created.onDetails = { showPanelDetails(activityId) }
+            created.onStop = { confirmPanelStop(activityId) }
+        }
+        panel.render(record, null, System.currentTimeMillis())
+        panel.showAnimated()
+        startPanelLoop(activityId)
+    }
+
+    private fun hideFloatingPanel() {
+        panelJob?.cancel()
+        panelJob = null
+        floatingPanel?.hideAnimated()
+    }
+
+    /** Lightweight polling only while the panel is visible (spec: never hot). */
+    private fun startPanelLoop(activityId: String) {
+        panelJob?.cancel()
+        panelJob = lifecycleScope.launch {
+            while (isActive) {
+                renderPanel(activityId)
+                delay(2_000L)
+            }
+        }
+    }
+
+    private fun renderPanel(activityId: String) {
+        val panel = floatingPanel ?: return
+        val record = activityCenter.find(activityId)
+        if (record == null || record.status.isTerminal) {
+            hideFloatingPanel()
+            return
+        }
+        val rootPids = buildSet {
+            record.pid?.takeIf { it > 0 }?.let { add(it) }
+            // Attribute the whole process tree of the owning session.
+            sessionManager?.sessions?.value
+                ?.firstOrNull { it.label == record.sessionId }
+                ?.let { entry -> entry.session.pid.takeIf { it > 0 }?.let(::add) }
+        }
+        val usage: NoxsTreeUsage? = if (rootPids.isEmpty()) null
+        else runCatching { procSampler.sampleTree(rootPids) }.getOrNull()
+        panel.render(record, usage, System.currentTimeMillis())
+    }
+
+    private fun showPanelLogs(activityId: String) {
+        val lines = activityCenter.recentOutput(activityId)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.activity_logs_title)
+            .setMessage(if (lines.isEmpty()) "No recent output." else lines.joinToString("\n"))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showPanelDetails(activityId: String) {
+        val record = activityCenter.find(activityId) ?: return
+        val usage = procSampler.sampleTree(setOfNotNull(record.pid?.takeIf { it > 0 }))
+        AlertDialog.Builder(this)
+            .setTitle(R.string.activity_details_title)
+            .setMessage(
+                FloatingStatusPanel.statusText(record.status) + "\n" +
+                    "Session: " + record.sessionId.ifBlank { "—" } + "\n" +
+                    "Process: " + record.command.ifBlank { record.title } + "\n" +
+                    "PID: " + (record.pid?.toString() ?: "—") + "\n" +
+                    "CPU: " + (usage?.let { "%.0f%%".format(it.cpuPercent) } ?: "—") + "\n" +
+                    "RAM: " + (usage?.let { "${it.rssKb / 1024} MB" } ?: "—") + "\n" +
+                    "Processes: " + (usage?.processCount ?: 0) + "\n" +
+                    "Directory: " + record.workingDirectory.ifBlank { "—" }
+            )
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun confirmPanelStop(activityId: String) {
+        val record = activityCenter.find(activityId) ?: return
+        AlertDialog.Builder(this)
+            .setTitle(R.string.activity_stop_confirm_title)
+            .setMessage(getString(R.string.activity_stop_confirm_msg, record.title))
+            .setPositiveButton(R.string.activity_stop) { _, _ ->
+                lifecycleScope.launch(Dispatchers.IO) { activityCenter.requestStop(activityId) }
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
+    }
+
     // ---- TerminalSessionClient forwarding to the terminal views ----
 
     override fun onTextChanged(session: TerminalSession) {
@@ -672,15 +831,36 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     }
 
     override fun onSessionFinished(session: TerminalSession) {
-        if (current?.session === session) {
+        val wasCurrent = current?.session === session
+        if (wasCurrent) {
             binding.terminal.invalidate()
             binding.statusSession.text = "${session.label} (exited ${session.exitCode})"
         }
-        Toast.makeText(
-            this,
-            getString(R.string.session_finished_toast, session.label, session.exitCode),
-            Toast.LENGTH_LONG
-        ).show()
+        current?.activityId?.let { id ->
+            if (floatingPanel?.visibility == View.VISIBLE) hideFloatingPanel()
+        }
+
+        // Smart exit: only the finished shell closes. Noxs stays alive while
+        // other sessions or background activity remain, and shuts down cleanly
+        // only when the LAST shell exits with nothing else running (spec 8-10).
+        val mgr = sessionManager ?: RuntimeHolder.sessions
+        val remaining = mgr?.sessions?.value?.size ?: 0
+        val center = (application as NoxsApplication).activityCenter
+        when {
+            remaining > 0 ->
+                Toast.makeText(this, getString(R.string.session_closed_remaining, remaining), Toast.LENGTH_LONG).show()
+            center.hasPersistentWork() ->
+                Toast.makeText(this, getString(R.string.session_closed_background), Toast.LENGTH_LONG).show()
+            wasCurrent && System.currentTimeMillis() - attachedAtMs < SHUTDOWN_GRACE_MS ->
+                // A shell that died immediately is a bootstrap failure, not a
+                // user "exit" — keep the app open so the user can diagnose.
+                Toast.makeText(this, getString(R.string.session_closed_background), Toast.LENGTH_LONG).show()
+            else -> {
+                Toast.makeText(this, getString(R.string.noxs_shutting_down), Toast.LENGTH_LONG).show()
+                NoxsService.requestStopAll(this)
+                finishAffinity()
+            }
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -699,5 +879,6 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         const val PREF_FIRST_SHELL_WELCOME_SHOWN = "first_shell_welcome_shown"
         const val WEBSITE_URL = "https://crossberry.vercel.app"
         const val SUPPORT_EMAIL = "mailto:crossberryweb@gmail.com"
+        const val SHUTDOWN_GRACE_MS = 3_000L
     }
 }

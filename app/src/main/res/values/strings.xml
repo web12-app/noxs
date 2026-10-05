@@ -82,6 +82,9 @@
     <string name="action_cancel">Cancel</string>
     <string name="err_generic">Something went wrong. See Diagnostics for details.</string>
     <string name="err_storage">Unable to initialize app storage.</string>
+    <string name="err_storage_space">Not enough free storage. Noxs needs about 1 GB free to install — free up space and try again.</string>
+    <string name="err_network">Couldn’t reach the download servers. Check your internet connection (try Wi-Fi or mobile data) and tap Try again.</string>
+    <string name="err_bootstrap_corrupt">The downloaded files were corrupted and could not be verified. Tap Try again — the download restarts fresh.</string>
     <string name="err_bootstrap">Unable to start Linux environment. Check your connection and retry.</string>
     <string name="err_bootstrap_verify">Bootstrap verification failed. The download could not be verified.</string>
     <string name="err_package_install">Package installation failed. See the terminal output.</string>
@@ -170,12 +173,60 @@
     <string name="about_version">Version %1$s</string>
 
     <!-- Notifications -->
+    <string name="notif_short_title">Noxs</string>
+    <string name="notif_running_one">● Running: %1$s</string>
+    <string name="notif_running_many">● Running: %1$s (+%2$d more)</string>
     <string name="notif_title">Noxs Linux environment</string>
     <string name="notif_sessions">%1$d terminal session(s) running</string>
     <string name="notif_idle">Linux environment running</string>
     <string name="channel_runtime">Noxs runtime</string>
+    <string name="channel_activity">Noxs Activity</string>
 
     <!-- Session manager (drawer list) -->
     <string name="session_close">Close</string>
     <string name="session_root_badge">ROOT</string>
+
+    <!-- Background Activity Center -->
+    <string name="title_activity_center">Noxs Activity</string>
+    <string name="activity_open">Open</string>
+    <string name="activity_stop">Stop</string>
+    <string name="activity_stop_noxs">Stop Noxs</string>
+    <string name="activity_clear_finished">Clear finished</string>
+    <string name="activity_section_running">RUNNING</string>
+    <string name="activity_section_completed">COMPLETED</string>
+    <string name="activity_section_failed">FAILED</string>
+    <string name="activity_section_stopped">STOPPED</string>
+    <string name="activity_none">No background activity. Start a command in the terminal.</string>
+    <string name="activity_status_starting">● Starting…</string>
+    <string name="activity_status_running">● Running…</string>
+    <string name="activity_status_completed">✓ Completed</string>
+    <string name="activity_status_failed">✕ Failed</string>
+    <string name="activity_status_stopped">■ Stopped</string>
+    <string name="activity_status_stopping">■ Stopping…</string>
+    <string name="activity_status_queued">○ Queued</string>
+    <string name="activity_exit_code">Exit code: %1$d</string>
+    <string name="activity_logs_title">Recent output</string>
+    <string name="activity_details_title">Details</string>
+    <string name="activity_stop_confirm_title">Stop activity?</string>
+    <string name="activity_stop_confirm_msg">%1$s will receive a termination signal and shut down gracefully. Other sessions and services are not affected.</string>
+    <string name="stop_all_confirm_title">Stop Noxs?</string>
+    <string name="stop_all_confirm_msg">This will close all active sessions and background processes, then shut down the Noxs Linux environment. Android apps are not affected.</string>
+    <string name="stop_all_positive">Stop Noxs</string>
+    <string name="session_closed_remaining">Session closed — %1$d session(s) still running</string>
+    <string name="session_closed_background">Session closed — background activity still running</string>
+    <string name="noxs_shutting_down">No active sessions — Noxs shutting down…</string>
+    <string name="action_center">Activity</string>
+    <string name="nav_activity_center">Activity Center</string>
+    <string name="float_terminal">Terminal</string>
+    <string name="float_logs">Logs</string>
+    <string name="float_details">Details</string>
+    <string name="float_stop">Stop</string>
+    <string name="float_label_session">Session</string>
+    <string name="float_label_process">Process</string>
+    <string name="float_label_cpu">CPU</string>
+    <string name="float_label_ram">RAM</string>
+    <string name="float_label_uptime">Uptime</string>
+    <string name="float_label_dir">Directory</string>
+    <string name="float_label_pid">PID</string>
+    <string name="notif_action_stop">Stop</string>
 </resources>

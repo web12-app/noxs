@@ -46,7 +46,13 @@
             android:exported="false"
             android:label="@string/title_terminal"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ActivityCenterActivity"
+            android:exported="false"
+            android:label="@string/title_activity_center" />
 
         <activity
             android:name=".ui.FileBrowserActivity"

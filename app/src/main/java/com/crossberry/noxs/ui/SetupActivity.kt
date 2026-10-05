@@ -103,13 +103,16 @@ class SetupActivity : AppCompatActivity(), NoxsInstaller.Progress {
                 when (val result = installer.install(this@SetupActivity)) {
                     is NoxsInstaller.InstallResult.Success -> showDone()
                     is NoxsInstaller.InstallResult.Failure -> {
-                        // Full details stay in the private diagnostics buffer, not on
-                        // the setup screen or in the user's terminal transcript.
+                        // Full details stay in the private diagnostics buffer; the
+                        // setup screen shows the specific failure category so the
+                        // user knows what to fix (network vs storage vs corrupt).
                         NoxsLog.e("Setup", "setup failed: ${result.detail}")
+                        val specific = getString(result.userMessageRes)
                         binding.progress.isIndeterminate = false
                         binding.progress.progress = 0
-                        binding.tvStep.text = getString(R.string.setup_failed_generic)
+                        binding.tvStep.text = specific
                         appendProgressLine(getString(R.string.setup_failed_generic))
+                        appendProgressLine(specific)
                         binding.passwordBlock.visibility = View.VISIBLE
                         binding.btnStart.visibility = View.VISIBLE
                         binding.btnStart.text = getString(R.string.setup_retry)

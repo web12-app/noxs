@@ -11,9 +11,13 @@ internal object SetupProgressSanitizer {
             lower.contains("password set")) return null
 
         return when {
+            lower.contains("resuming") -> "Resuming your download"
+            lower.contains("mirror") -> "Trying an alternate download server"
+            lower.contains("retry") || lower.contains("reconnect") -> "Reconnecting…"
             lower.contains("download") -> "Downloading your Linux environment"
             lower.contains("checksum") || lower.contains("verif") -> "Checking downloaded files"
             lower.contains("extract") -> "Preparing your files"
+            lower.contains("storage") -> "Checking free storage"
             lower.contains("apt") || lower.contains("dpkg") || lower.contains("package") ||
                 lower.contains("certificate") || lower.contains("metadata") || lower.contains("https") ||
                 lower.contains("http") -> "Preparing secure connections"

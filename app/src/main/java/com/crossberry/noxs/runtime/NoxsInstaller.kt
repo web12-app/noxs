@@ -37,6 +37,10 @@ import java.net.URL
 import java.nio.CharBuffer
 import java.security.SecureRandom
 
+/** Raised when the device does not have enough free space for bootstrap. */
+class InsufficientStorageException(val requiredBytes: Long, val usableBytes: Long) :
+    RuntimeException("insufficient storage: need ${requiredBytes / (1024 * 1024)} MB, usable ${usableBytes / (1024 * 1024)} MB")
+
 class NoxsInstaller(
     private val context: Context,
     private val paths: NoxsPaths,
@@ -105,6 +109,12 @@ class NoxsInstaller(
 
             // 6 — safe extraction
             progress.onStep(6, R.string.setup_step_extract, "")
+            // Extraction can need roughly 3x the archive size as free space.
+            val extractNeeded = InstallerPlan.extractionReserveBytes(manifest.rootfs.sizeBytes)
+            val extractUsable = paths.rootfs.usableSpace
+            if (extractUsable in 1 until extractNeeded) {
+                throw InsufficientStorageException(extractNeeded, extractUsable)
+            }
             // Remove any stale 0-byte top-level placeholders before extracting
             listOf("bin", "sbin", "lib", "lib64").forEach { name ->
                 val f = File(paths.rootfs, name)
@@ -145,12 +155,19 @@ class NoxsInstaller(
             )
             progress.onStep(11, R.string.setup_step_shell, "")
             InstallResult.Success(sha)
+        } catch (e: InsufficientStorageException) {
+            NoxsLog.e("Installer", "storage check failed", e)
+            InstallResult.Failure(R.string.err_storage_space, e.message ?: "storage")
         } catch (e: SecurityException) {
             NoxsLog.e("Installer", "security check failed", e)
             InstallResult.Failure(R.string.err_bootstrap_verify, e.message ?: "security")
         } catch (e: Exception) {
             NoxsLog.e("Installer", "install failed", e)
-            InstallResult.Failure(R.string.err_bootstrap, e.message ?: e.javaClass.simpleName)
+            if (InstallerPlan.isNetworkError(e)) {
+                InstallResult.Failure(R.string.err_network, e.message ?: e.javaClass.simpleName)
+            } else {
+                InstallResult.Failure(R.string.err_bootstrap, e.message ?: e.javaClass.simpleName)
+            }
         }
     }
 
@@ -202,59 +219,103 @@ class NoxsInstaller(
             doVerify(dest, artifact.sha256)
             return@withContext
         }
+
+        // Free-space precheck before spending minutes on a large download.
+        val needed = InstallerPlan.downloadReserveBytes(artifact.sizeBytes)
+        val usable = dest.parentFile?.usableSpace ?: 0L
+        if (usable in 1 until needed) {
+            throw InsufficientStorageException(needed, usable)
+        }
+
+        val candidates = InstallerPlan.candidateUrls(artifact.url)
         val staged = File(dest.absolutePath + ".part")
         staged.parentFile?.mkdirs()
-        staged.delete()
 
         var lastError: Exception? = null
         var downloaded = false
-        for (attempt in 0 until attempts) {
-            if (attempt > 0) {
-                progress.onLog("retry ${attempt + 1}/$attempts after network error: " +
-                    (lastError?.message ?: "unknown"))
-                try { Thread.sleep(2_000L * attempt) } catch (_: InterruptedException) {}
+        outer@ for (candidateIndex in candidates.indices) {
+            val url = candidates[candidateIndex]
+            if (candidateIndex > 0) {
+                progress.onLog("mirror: trying alternate download server (${candidateIndex + 1}/${candidates.size})")
             }
-            try {
-                val conn = URL(artifact.url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 20_000
-                conn.readTimeout = 60_000
-                conn.instanceFollowRedirects = true
-                conn.setRequestProperty("User-Agent", "Noxs/${BuildConfig.VERSION_NAME} (Android; bootstrap)")
-                conn.setRequestProperty("Accept-Encoding", "identity")
+            for (attempt in 0 until attempts) {
+                if (attempt > 0) {
+                    progress.onLog("retry ${attempt + 1}/$attempts after network error: " +
+                        (lastError?.message ?: "unknown"))
+                    try { Thread.sleep(2_000L * attempt) } catch (_: InterruptedException) {}
+                }
+                // Resume support: keep the partial file across retries so a
+                // dropped 90%-done 48 MB download does not restart from zero.
+                val resumeFrom = if (staged.isFile) staged.length() else 0L
+                if (resumeFrom > 0L && attempt == 0 && candidateIndex == 0) {
+                    progress.onLog("download: resuming from ${resumeFrom / (1024 * 1024)} MB")
+                }
                 try {
-                    conn.connect()
-                    if (conn.responseCode !in 200..299) {
-                        throw java.io.IOException("HTTP ${conn.responseCode} for ${artifact.url}")
+                    val conn = URL(url).openConnection() as HttpURLConnection
+                    conn.connectTimeout = 30_000
+                    conn.readTimeout = 60_000
+                    conn.instanceFollowRedirects = true
+                    conn.setRequestProperty("User-Agent", "Noxs/${BuildConfig.VERSION_NAME} (Android; bootstrap)")
+                    conn.setRequestProperty("Accept-Encoding", "identity")
+                    if (resumeFrom > 0L) {
+                        conn.setRequestProperty("Range", "bytes=$resumeFrom-")
                     }
-                    val total = conn.contentLengthLong
-                    conn.inputStream.use { input ->
-                        FileOutputStream(staged).use { out ->
-                            val buf = ByteArray(128 * 1024)
-                            var done = 0L
-                            while (true) {
-                                val n = input.read(buf)
-                                if (n < 0) break
-                                out.write(buf, 0, n)
-                                done += n
-                                progress.onProgressBytes(done, total)
+                    try {
+                        conn.connect()
+                        val code = conn.responseCode
+                        if (code !in 200..299) {
+                            throw java.io.IOException("HTTP $code for $url")
+                        }
+                        // 200 (not 206) means the server ignored Range: restart clean.
+                        val appending = resumeFrom > 0L && code == 206
+                        val total = when {
+                            appending && conn.contentLengthLong > 0 -> conn.contentLengthLong + resumeFrom
+                            conn.contentLengthLong > 0 -> conn.contentLengthLong
+                            else -> artifact.sizeBytes
+                        }
+                        conn.inputStream.use { input ->
+                            java.io.FileOutputStream(staged, appending).use { out ->
+                                val buf = ByteArray(128 * 1024)
+                                var done = if (appending) resumeFrom else 0L
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    done += n
+                                    progress.onProgressBytes(done, total)
+                                }
                             }
                         }
+                    } finally {
+                        conn.disconnect()
                     }
-                } finally {
-                    conn.disconnect()
+                    try {
+                        // verify BEFORE renaming into place (interrupted downloads never verify)
+                        doVerify(staged, artifact.sha256)
+                        staged.renameTo(dest) || (staged.copyTo(dest, overwrite = true).isFile)
+                        downloaded = true
+                    } catch (e: SecurityException) {
+                        // A corrupt resume (bad prefix bytes) — restart once from zero.
+                        if (resumeFrom > 0L) {
+                            progress.onLog("download: partial file failed verification, restarting")
+                            staged.delete()
+                            lastError = e
+                            continue
+                        }
+                        throw e
+                    }
+                    break@outer
+                } catch (e: java.io.IOException) {
+                    lastError = e
+                    // Keep staged for resume on the next attempt; delete only if tiny/garbage.
+                    if (staged.isFile && staged.length() < 64 * 1024) staged.delete()
                 }
-                downloaded = true
-                break
-            } catch (e: java.io.IOException) {
-                lastError = e
-                staged.delete()
             }
         }
-        if (!downloaded) lastError?.let { throw it }
-
-        // verify BEFORE renaming into place (interrupted downloads never verify)
-        doVerify(staged, artifact.sha256)
-        staged.renameTo(dest) || (staged.copyTo(dest, overwrite = true).isFile)
+        if (!downloaded) {
+            lastError?.let { throw it }
+            throw java.io.IOException("download failed for $dest")
+        }
     }
 
     /** Creates the noxs user (uid 1000, sudo group) and sets its password. */
@@ -368,6 +429,48 @@ class NoxsInstaller(
         [ -e /var/run ] || ln -s /run /var/run
         exit 0
     """.trimIndent()
+}
+
+/**
+ * Pure planning helpers for the bootstrap pipeline (unit-testable on the JVM).
+ */
+object InstallerPlan {
+    /** Candidate URLs: the pinned primary first, then derived mirrors. */
+    fun candidateUrls(primary: String): List<String> {
+        val list = mutableListOf(primary)
+        // raw.githubusercontent.com/<o>/<r>/<ref>/<path> → github.com raw redirect
+        // (different host name; helps where a carrier/DNS path blackholes raw.*)
+        val rawPrefix = "https://raw.githubusercontent.com/"
+        if (primary.startsWith(rawPrefix)) {
+            // raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>
+            //   → https://github.com/<owner>/<repo>/raw/<ref>/<path>
+            val parts = primary.removePrefix(rawPrefix).split('/', limit = 3)
+            if (parts.size == 3) {
+                list += "https://github.com/${parts[0]}/${parts[1]}/raw/${parts[2]}"
+            }
+        }
+        return list.distinct()
+    }
+
+    /** Free space required before starting a download of [artifactBytes]. */
+    fun downloadReserveBytes(artifactBytes: Long): Long =
+        if (artifactBytes <= 0L) 256L * 1024 * 1024
+        else artifactBytes + 128L * 1024 * 1024
+
+    /** Free space required before extraction (archive + unpacked tree + slack). */
+    fun extractionReserveBytes(artifactBytes: Long): Long =
+        if (artifactBytes <= 0L) 768L * 1024 * 1024
+        else artifactBytes * 4
+
+    fun isNetworkError(e: Throwable): Boolean = when (e) {
+        is java.net.UnknownHostException,
+        is java.net.ConnectException,
+        is java.net.SocketTimeoutException,
+        is java.net.SocketException,
+        is javax.net.ssl.SSLException,
+        is java.io.IOException -> true
+        else -> false
+    }
 }
 
 /** Small helper so the installer doesn't import android.os directly in tests. */

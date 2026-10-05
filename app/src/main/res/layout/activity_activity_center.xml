@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Noxs Activity Center: compact list of tracked background work -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/noxs_background"
+    android:fitsSystemWindows="true">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="10dp"
+        android:background="@color/noxs_surface">
+
+        <TextView
+            android:id="@+id/btn_back"
+            style="@style/Text.Noxs.Mono"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:background="@color/noxs_surface_alt"
+            android:text="‹ Back"
+            android:textColor="@color/noxs_primary"
+            android:textSize="12sp" />
+
+        <TextView
+            style="@style/Text.Noxs.Mono"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:text="@string/title_activity_center"
+            android:textStyle="bold"
+            android:textColor="@color/noxs_primary"
+            android:textSize="15sp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/btn_clear_finished"
+            style="@style/Text.Noxs.Mono"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:layout_marginEnd="6dp"
+            android:background="@color/noxs_surface_alt"
+            android:text="@string/activity_clear_finished"
+            android:textColor="@color/noxs_secondary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/btn_stop_noxs"
+            style="@style/Text.Noxs.Mono"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:background="@color/noxs_error_container"
+            android:text="@string/activity_stop_noxs"
+            android:textColor="@color/noxs_on_error_container"
+            android:textStyle="bold"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/empty_state"
+        style="@style/Text.Noxs.Mono"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="18dp"
+        android:text="@string/activity_none"
+        android:textColor="@color/noxs_text_dim"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/activity_list"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:paddingTop="6dp"
+        android:paddingBottom="10dp"
+        android:clipToPadding="false" />
+</LinearLayout>

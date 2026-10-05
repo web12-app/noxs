@@ -49,8 +49,8 @@ noxs/
 ├── sandbox/                sandbox docs (filesystem, users, permissions, sessions)
 ├── packages/               apt config, manifest schema, repository references
 ├── scripts/                bootstrap.sh · build-rootfs.sh · package.sh · test.sh
-├── docs/                   ARCHITECTURE · BOOTSTRAP · SECURITY · TESTING ·
-│                           UNIX-SOCKETS · FAQ
+├── docs/                   ARCHITECTURE · BOOTSTRAP · ACTIVITY-CENTER · SECURITY ·
+│                           TESTING · UNIX-SOCKETS · FAQ
 ├── .github/workflows/      android-ci.yml (build + validate + release)
 └── LICENSE, NOTICE.md      Apache-2.0
 ```
@@ -77,6 +77,15 @@ CI builds everything automatically (see `.github/workflows/android-ci.yml`).
 4. Terminal opens: `noxs@android:~$`
 
 Everything after bootstrap works offline.
+
+## Background Activity Center
+
+Sessions, commands, services and code-server keep running behind the
+foreground service while you use other apps. A single live notification shows
+what is running (with progress) and offers Open / Stop; the in-app Activity
+Center and floating status panel give full control. `exit` closes only the
+current shell — Noxs shuts down only when the last shell exits with no
+background work left. Details: [docs/ACTIVITY-CENTER.md](docs/ACTIVITY-CENTER.md).
 
 ## Security posture
 

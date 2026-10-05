@@ -2,7 +2,8 @@
  * Noxs — original implementation.
  * Session manager: creates/holds terminal sessions bound to the Debian
  * userspace, enforces the session quota, and keeps them alive behind the
- * foreground service.
+ * foreground service. Every session registers with the NoxsActivityCenter so
+ * the Activity Center, floating panel and notification share one state source.
  */
 package com.crossberry.noxs.runtime
 
@@ -18,7 +19,8 @@ import java.io.File
 class NoxsSessionManager(
     private val paths: NoxsPaths,
     private val launcher: ProotLauncher,
-    private val resources: NoxsResources
+    private val resources: NoxsResources,
+    private val center: NoxsActivityCenter? = null
 ) : TerminalSessionClient {
 
     data class Entry(
@@ -26,7 +28,8 @@ class NoxsSessionManager(
         val label: String,
         val startedAt: Long,
         val loginAsRoot: Boolean,
-        val isFallback: Boolean = false
+        val isFallback: Boolean = false,
+        val activityId: String? = null
     )
 
     private val _sessions = MutableStateFlow<List<Entry>>(emptyList())
@@ -38,6 +41,7 @@ class NoxsSessionManager(
     var client: TerminalSessionClient? = null
 
     private var sessionSeq = 0
+    private val lastOutputPush = HashMap<String, Long>()
 
     fun createSession(
         label: String,
@@ -77,7 +81,21 @@ class NoxsSessionManager(
 
         session.start(argv.toTypedArray(), env, paths.tmp.absolutePath, preferPty = true)
 
-        val entry = Entry(session, name, System.currentTimeMillis(), loginAsRoot, isFallback = false)
+        // Register with the Activity Center (single source of truth for state).
+        val activity = center?.register(
+            title = "Terminal — $name",
+            command = "proot · Debian 12",
+            sessionId = name,
+            kind = NoxsActivityKind.SESSION,
+            pid = session.pid.takeIf { it > 0 },
+            workingDirectory = workDir,
+            status = if (session.isRunning) NoxsActivityStatus.RUNNING else NoxsActivityStatus.STARTING
+        )
+
+        val entry = Entry(
+            session, name, System.currentTimeMillis(), loginAsRoot,
+            isFallback = false, activityId = activity?.activityId
+        )
         _sessions.value = _sessions.value + entry
         NoxsLog.i("Sessions", "created '$name' pid=${session.pid} pty=${session.isPty}")
         updateNotification()
@@ -129,12 +147,19 @@ class NoxsSessionManager(
         )
         session.start(arrayOf(shBin, "-i"), env, homeDir.absolutePath, preferPty = true)
 
+        // The activity stays alive — it is the same logical session, new pid.
+        failedEntry.activityId?.let { id ->
+            center?.markRunning(id, pid = session.pid.takeIf { it > 0 })
+            center?.attachOutput(id, "[Noxs] proot exited (code $exitCode) — attached sandbox shell")
+        }
+
         val fallbackEntry = Entry(
             session = session,
             label = failedEntry.label,
             startedAt = System.currentTimeMillis(),
             loginAsRoot = failedEntry.loginAsRoot,
-            isFallback = true
+            isFallback = true,
+            activityId = failedEntry.activityId
         )
         _sessions.value = (_sessions.value - failedEntry) + fallbackEntry
         updateNotification()
@@ -142,13 +167,17 @@ class NoxsSessionManager(
     }
 
     fun closeSession(entry: Entry) {
+        entry.activityId?.let { center?.markStopped(it) }
         entry.session.kill()
         _sessions.value = _sessions.value - entry
         updateNotification()
     }
 
     fun closeAll() {
-        _sessions.value.forEach { it.session.kill() }
+        _sessions.value.forEach { entry ->
+            entry.activityId?.let { center?.markStopped(it) }
+            entry.session.kill()
+        }
         _sessions.value = emptyList()
         updateNotification()
     }
@@ -160,6 +189,7 @@ class NoxsSessionManager(
     // ---- TerminalSessionClient forwarding (session -> UI + service) ----
 
     override fun onTextChanged(session: TerminalSession) {
+        pushOutputSummary(session)
         MainLoop.post { client?.onTextChanged(session) }
     }
 
@@ -186,8 +216,41 @@ class NoxsSessionManager(
         val exitNotice = "\r\n\u001b[1;33m[Process exited with code ${session.exitCode}]\u001b[0m\r\n"
         session.emulator.write(exitNotice.toByteArray(Charsets.UTF_8))
 
+        // Reconcile the Activity Center record with the real outcome. A record
+        // already settled (user-initiated stop) is never overwritten — manual
+        // stops stay STOPPED even when the process reports a signal exit.
+        entry?.activityId?.let { id ->
+            val current = center?.find(id)
+            if (current == null || !current.status.isTerminal) {
+                when {
+                    session.exitCode == 0 -> center?.markCompleted(id, 0)
+                    session.exitCode < 0 -> center?.markFailed(id, session.exitCode, "Process stopped unexpectedly")
+                    else -> center?.markFailed(id, session.exitCode)
+                }
+            }
+        }
+
         if (entry != null) _sessions.value = _sessions.value - entry
         updateNotification()
         MainLoop.post { client?.onSessionFinished(session) }
+    }
+
+    /**
+     * Feed the Activity Center a throttled last-line summary. Output history
+     * itself stays in the terminal emulator; the center only keeps a summary.
+     */
+    private fun pushOutputSummary(session: TerminalSession) {
+        val activityId = _sessions.value.firstOrNull { it.session === session }?.activityId ?: return
+        val now = System.currentTimeMillis()
+        if (now - (lastOutputPush[activityId] ?: 0L) < OUTPUT_SUMMARY_INTERVAL_MS) return
+        lastOutputPush[activityId] = now
+        val lastLine = runCatching {
+            session.emulator.transcriptText().lineSequence().lastOrNull { it.isNotBlank() }
+        }.getOrNull()
+        if (!lastLine.isNullOrBlank()) center?.attachOutput(activityId, lastLine)
+    }
+
+    private companion object {
+        const val OUTPUT_SUMMARY_INTERVAL_MS = 1_500L
     }
 }
