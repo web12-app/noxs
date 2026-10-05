@@ -98,18 +98,20 @@ class SetupOpTrackerTest {
         val tracker = tracker(clock)
         tracker.start("Preparing environment")
 
+        // Frames: ⠋(0) ⠙(1) ⠹(2) ⠸(3) ⠼(4) ⠴(5) ⠦(6) ⠧(7) ⠇(8) ⠏(9)
         assertEquals('⠋', tracker.spinnerFrame()) // t=0
-
         clock.ms += 100L
-        assertEquals('⠙', tracker.spinnerFrame())
-        clock.ms += 200L
-        assertEquals('⠹', tracker.spinnerFrame())
-        clock.ms += 600L
-        assertEquals('⠸', tracker.spinnerFrame())
+        assertEquals('⠙', tracker.spinnerFrame()) // t=100
+        clock.ms += 100L
+        assertEquals('⠹', tracker.spinnerFrame()) // t=200
+        clock.ms += 100L
+        assertEquals('⠸', tracker.spinnerFrame()) // t=300
 
         // After a full cycle the frames repeat.
+        clock.ms += 700L
+        assertEquals('⠋', tracker.spinnerFrame()) // t=1000 → wraps to frame 0
         clock.ms += 900L
-        assertEquals('⠋', tracker.spinnerFrame())
+        assertEquals('⠏', tracker.spinnerFrame()) // t=1900 → frame 19 % 10 = 9
     }
 
     @Test

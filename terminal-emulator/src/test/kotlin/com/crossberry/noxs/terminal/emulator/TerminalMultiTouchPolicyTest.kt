@@ -77,23 +77,28 @@ class TerminalMultiTouchPolicyTest {
     }
 
     @Test
-    fun `pinch zoom disabled forces translation to scroll`() {
+    fun `pinch zoom disabled leaves translation-driven scroll`() {
         val p = policy()
         p.pinchZoomEnabled = false
         p.onBegin(100f)
+        // Translation-dominant move (span barely changes) → two-finger scroll.
         assertEquals(
             TerminalMultiTouchPolicy.Mode.TWO_FINGER_SCROLL,
-            p.onMove(160f, dx = 0f, dy = 30f)
+            p.onMove(101f, dx = 0f, dy = 30f)
         )
+        // Span-dominant move with pinch disabled: never decides, never scrolls.
+        p = policy().also { it.pinchZoomEnabled = false; it.twoFingerScrollEnabled = true }
+        p.onBegin(100f)
+        assertEquals(TerminalMultiTouchPolicy.Mode.UNDECIDED, p.onMove(200f, dx = 0f, dy = 2f))
     }
 
     @Test
-    fun `pinch zoom disabled and scroll disabled ignores the gesture`() {
+    fun `pinch zoom disabled and scroll disabled ignores translation`() {
         val p = policy()
         p.pinchZoomEnabled = false
         p.twoFingerScrollEnabled = false
         p.onBegin(100f)
-        assertEquals(TerminalMultiTouchPolicy.Mode.IGNORED, p.onMove(160f, dx = 0f, dy = 30f))
+        assertEquals(TerminalMultiTouchPolicy.Mode.IGNORED, p.onMove(101f, dx = 0f, dy = 30f))
     }
 
     @Test

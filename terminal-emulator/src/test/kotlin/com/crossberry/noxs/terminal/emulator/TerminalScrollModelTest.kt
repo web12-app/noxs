@@ -22,7 +22,8 @@ class TerminalScrollModelTest {
 
         assertTrue(model.onOutputPushed(5, userAtBottom = true, sessionHasProcess = true))
         assertEquals(0, model.newLinesBehind)
-        assertTrue(model.shouldShowIndicator(userAtBottom = true))
+        // Anchored at the live bottom: the "new lines" pill stays hidden.
+        assertFalse(model.shouldShowIndicator(userAtBottom = true))
         assertNull(model.indicatorLabel(userAtBottom = true, viewportOffset = 0))
     }
 

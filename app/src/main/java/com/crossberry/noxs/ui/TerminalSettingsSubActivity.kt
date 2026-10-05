@@ -10,6 +10,7 @@ package com.crossberry.noxs.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.crossberry.noxs.R
 import com.crossberry.noxs.databinding.ActivityTerminalSettingsBinding
