@@ -26,7 +26,7 @@ import com.crossberry.noxs.environments.model.EnvironmentVariant
 import com.crossberry.noxs.environments.model.SetupState
 import com.crossberry.noxs.environments.model.SetupStateMachine
 import com.crossberry.noxs.environments.model.SetupTask
-import com.crossberry.noxs.environments.providers.EnvironmentProvider
+import com.crossberry.noxs.environments.EnvironmentProvider
 import com.crossberry.noxs.runtime.NoxsPaths
 import com.crossberry.noxs.runtime.ProotLauncher
 import com.crossberry.noxs.runtime.NoxsResources

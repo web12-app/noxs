@@ -43,7 +43,7 @@ class EnvironmentManagerActivity : AppCompatActivity() {
         }
         root.addView(container)
         setContentView(root)
-        title(getString(R.string.env_manager_title))
+        setTitle(getString(R.string.env_manager_title))
 
         val app = application as com.crossberry.noxs.NoxsApplication
         scope.launch {

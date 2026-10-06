@@ -126,7 +126,7 @@ abstract class RootfsTarballProvider : EnvironmentProvider {
             ctx.onLog("storage check passed: ${plan.totalRequired / (1024 * 1024)} MB required")
 
             // DOWNLOAD — streaming, resumable, verified (spec §10, §11).
-            ctx.onStage(SetupState.DOWNLOADING, "Downloading ${distro.displayName}")
+            ctx.onStage(SetupState.DOWNLOADING, "Downloading ${this@RootfsTarballProvider.displayName}")
             val downloader = DownloadManager(ctx.paths.cache)
             val spec = DownloadSpec(
                 taskId = ctx.paths.base.name + "-" + variant.id,
@@ -178,7 +178,7 @@ abstract class RootfsTarballProvider : EnvironmentProvider {
                 com.crossberry.noxs.environments.model.PackageManagerKind.APT) {
                 ctx.onLog("initializing signed package metadata (apt)")
                 val apt = NoxsAptBootstrapper(ctx.paths, ctx.launcher, ctx.isCancelled)
-                    .initialize(force = true, onLog = ctx::onLog)
+                    .initialize(force = true, onLog = { line -> ctx.onLog(line) })
                 if (!apt.success) {
                     // Non-fatal by design: the shell works without APT state; the
                     // background repair keeps fixing the package layer (spec §64).

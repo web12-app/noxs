@@ -113,25 +113,25 @@ data class SetupTask(
         fun fromJson(text: String): SetupTask? = runCatching {
             val m = EnvJson.readObject(text)
             SetupTask(
-                id = m.optString("id"),
-                environmentId = m.optString("environmentId"),
-                title = m.optString("title"),
-                state = SetupState.entries.firstOrNull { it.name == m.optString("state") }
+                id = EnvJson.optString(m, "id"),
+                environmentId = EnvJson.optString(m, "environmentId"),
+                title = EnvJson.optString(m, "title"),
+                state = SetupState.entries.firstOrNull { it.name == EnvJson.optString(m, "state") }
                     ?: SetupState.FAILED,
                 progress = ((m["progress"] as? Number)?.toInt() ?: -1),
-                currentOperation = m.optString("currentOperation"),
-                startedAt = m.optLong("startedAt"),
-                updatedAt = m.optLong("updatedAt"),
-                completedAt = m.optLong("completedAt"),
-                error = m.optString("error"),
-                cancellable = m.optBool("cancellable", true),
-                logPath = m.optString("logPath"),
-                resumableStage = m.optString("resumableStage"),
-                downloadUrl = m.optString("downloadUrl"),
-                downloadDest = m.optString("downloadDest"),
-                downloadedBytes = m.optLong("downloadedBytes"),
-                expectedBytes = m.optLong("expectedBytes"),
-                variant = m.optString("variant")
+                currentOperation = EnvJson.optString(m, "currentOperation"),
+                startedAt = EnvJson.optLong(m, "startedAt"),
+                updatedAt = EnvJson.optLong(m, "updatedAt"),
+                completedAt = EnvJson.optLong(m, "completedAt"),
+                error = EnvJson.optString(m, "error"),
+                cancellable = EnvJson.optBool(m, "cancellable", true),
+                logPath = EnvJson.optString(m, "logPath"),
+                resumableStage = EnvJson.optString(m, "resumableStage"),
+                downloadUrl = EnvJson.optString(m, "downloadUrl"),
+                downloadDest = EnvJson.optString(m, "downloadDest"),
+                downloadedBytes = EnvJson.optLong(m, "downloadedBytes"),
+                expectedBytes = EnvJson.optLong(m, "expectedBytes"),
+                variant = EnvJson.optString(m, "variant")
             )
         }.getOrNull()
     }

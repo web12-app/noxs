@@ -71,7 +71,7 @@ class EnvironmentPickerActivity : AppCompatActivity() {
         selectedVariant = null
         container.removeAllViews()
 
-        title(getString(R.string.env_welcome_title))
+        setTitle(getString(R.string.env_welcome_title))
 
         val header = TextView(this).apply {
             text = getString(R.string.env_welcome_title)

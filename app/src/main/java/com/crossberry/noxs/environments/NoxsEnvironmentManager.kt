@@ -79,8 +79,8 @@ class NoxsEnvironmentManager(private val context: Context) {
         val env = environmentFor(id) ?: return true
         if (env.storagePath == legacyPaths.base.absolutePath) return true
         return runCatching {
-            EnvJson.readObject(File(env.storagePath, "environment.json").readText())
-                ["family"] != "ARCH"
+            val family = EnvJson.readObject(File(env.storagePath, "environment.json").readText())["family"]
+            family != "ARCH"
         }.getOrDefault(true)
     }
 
@@ -236,10 +236,8 @@ class NoxsEnvironmentManager(private val context: Context) {
     }
 
     fun packageManagerFor(env: Environment): PackageManagerKind = runCatching {
-        PackageManagerKind.valueOf(
-            EnvJson.readObject(File(env.storagePath, "environment.json").readText())
-                ["packageManager"] as? String ?: PackageManagerKind.APT.name
-        )
+        val kind = EnvJson.readObject(File(env.storagePath, "environment.json").readText())["packageManager"]
+        PackageManagerKind.valueOf(kind as? String ?: PackageManagerKind.APT.name)
     }.getOrDefault(PackageManagerKind.APT)
 
     // ------------------------------------------------------------- termux

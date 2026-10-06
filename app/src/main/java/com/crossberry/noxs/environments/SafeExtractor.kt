@@ -12,6 +12,7 @@
  */
 package com.crossberry.noxs.environments
 
+import com.crossberry.noxs.shared.ExtractedStats
 import com.crossberry.noxs.shared.NoxsLog
 import com.crossberry.noxs.shared.RootfsExtractor
 import java.io.File
@@ -36,7 +37,7 @@ class SafeExtractor(private val boundaryRoot: File) {
         destDir: File,
         onProgress: (Long) -> Unit = {},
         beforeEntry: () -> Unit = {}
-    ): RootfsExtractor.ExtractedStats {
+    ): ExtractedStats {
         assertInside(archive, "archive")
         assertInside(destDir, "destination")
         if (!archive.isFile) throw IOException("archive is missing: ${archive.name}")

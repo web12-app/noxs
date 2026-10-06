@@ -68,7 +68,7 @@ class EnvironmentInstallActivity : AppCompatActivity() {
         root.addView(container)
         setContentView(root)
 
-        title(getString(R.string.env_install_title))
+        setTitle(getString(R.string.env_install_title))
         buildUi()
         maybeStartInstall()
 
