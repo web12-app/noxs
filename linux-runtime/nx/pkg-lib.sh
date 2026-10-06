@@ -47,6 +47,7 @@ semver_gt() {
     IFS=. read -r b1 b2 b3 <<< "$2"
     nx_num() {
         local v="$1"
+        # shellcheck disable=SC2295  # nested expansion is intentional
         v="${v#${v%%[!0]*}}"   # strip every leading zero
         [ -n "$v" ] || v=0
         printf '%s' "$v"
@@ -289,7 +290,10 @@ registry_pick_asset() {
             case "$name" in
                 *.nx.pkg.*."$want".tar.xz)
                     svar="RG_SHA_${idx}_$j"
+                    # exported to the caller (install_one)
+                    # shellcheck disable=SC2034
                     RA_NAME="$name"
+                    # shellcheck disable=SC2034
                     RA_SHA="${!svar}"
                     return 0
                     ;;
@@ -324,13 +328,19 @@ resolve_source() {
         valid_repo "$spec" || { err "Invalid repository: $spec (expected username/repo)"; return 2; }
         SS_OWNER="${spec%%/*}"
         SS_REPO="${spec#*/}"
+        # exported to the caller
+        # shellcheck disable=SC2034
         SS_KIND="git"
+        # shellcheck disable=SC2034
         SS_DISPLAY="@$spec"
     else
         valid_name "$spec" || { err "Invalid package name: $spec"; return 2; }
         SS_OWNER="${NX_OFFICIAL_ORG:-noxs-pkg}"
         SS_REPO="$spec"
+        # exported to the caller
+        # shellcheck disable=SC2034
         SS_KIND="official"
+        # shellcheck disable=SC2034
         SS_DISPLAY="$spec"
     fi
     return 0
@@ -441,6 +451,8 @@ manifest_write() {
 # corrupt temporary files behind).
 make_workdir() {
     NX_WORK="$(mktemp -d "${TMPDIR:-/tmp}/nx-pkg.XXXXXX")" || die "Cannot create a temporary directory."
+    # invoked via the traps below
+    # shellcheck disable=SC2317,SC2329
     nx_cleanup() { rm -rf "${NX_WORK:-}"; }
     trap nx_cleanup EXIT
     trap 'nx_cleanup; exit 130' INT

@@ -17,8 +17,8 @@ object TerminalLinks {
      * literal, or a bracketed IPv6 literal.
      */
     private val HTTP_URL = Regex(
-        pattern = "^(https?://)([^/:\\[\\]\\s]+|\\[[^\\]]+\\])(:\\d+)?(/.*)?$",
-        options = RegexOption.IGNORE_CASE
+        "^(https?://)([^/:\\[\\]\\s]+|\\[[^\\]]+\\])(:\\d+)?(/.*)?$",
+        setOf(RegexOption.IGNORE_CASE)
     )
 
     /** Hosts that mean "all interfaces" and must be rewritten for browsers. */

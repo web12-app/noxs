@@ -72,6 +72,7 @@ registry.json and signed releases (.nx.pkg artifacts with sha256).
 EOF
 }
 
+# shellcheck disable=SC2034  # read by pkg-lib.sh resolve_source
 NX_OFFICIAL_ORG="noxs-pkg"
 NX_VERSION="1.0.0"
 

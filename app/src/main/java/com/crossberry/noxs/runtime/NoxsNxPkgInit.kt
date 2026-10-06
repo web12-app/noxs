@@ -17,6 +17,7 @@ object NoxsNxPkgInit {
 
     val PKG_INIT = """# pkg-init.sh — nx pkg init (scaffold new packages from templates).
 # Sourced by nx after pkg-lib.sh. shell=bash
+# shellcheck shell=bash
 
 NX_TEMPLATE_ROOT="§{NX_TEMPLATE_ROOT:-/usr/local/share/noxs-pkg/templates}"
 
@@ -148,8 +149,11 @@ pkg_init_cmd() {
 
     if command -v git >/dev/null 2>&1; then
         if [ ! -d "§name/.git" ]; then
-            (cd "§name" && git init -q 2>/dev/null) && msg "Initialized git repository in §name" \
-                || msg "note: git init failed — run it manually before publishing"
+            if (cd "§name" && git init -q 2>/dev/null); then
+                msg "Initialized git repository in §name"
+            else
+                msg "note: git init failed — run it manually before publishing"
+            fi
         fi
     else
         msg "note: git is not installed — install it before publishing (sudo apt install git)"

@@ -1,5 +1,6 @@
 # pkg-install.sh — nx install / list / info / update / remove.
 # Sourced by nx after pkg-lib.sh. shell=bash
+# shellcheck shell=bash
 
 pkg_install_usage() {
     cat <<'EOF'
@@ -12,7 +13,7 @@ EOF
 # REQUESTED_VERSION empty = latest. Performs the full $17 flow.
 install_one() {
     local owner="$1" repo="$2" display="$3" requested="$4"
-    local ver tag arch vindex asset expected url code
+    local ver tag arch vindex asset expected url
 
     make_workdir
     stage "Resolving package..."
@@ -255,7 +256,7 @@ pkg_remove_cmd() {
     fi
 
     stage "Removing $name ${ver:-}..."
-    files=$(sed -n 's/^    "\(.*\)",*$/$1/p' "$mpath")
+    files=$(sed -n 's/^    "\(.*\)",*$/\1/p' "$mpath")
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         case "$f" in

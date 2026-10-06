@@ -18,6 +18,7 @@ object NoxsNxPkgDev {
 
     val PKG_DEV = """# pkg-dev.sh — nx pkg build / release / info.
 # Sourced by nx after pkg-lib.sh. shell=bash
+# shellcheck shell=bash
 
 # detect_language -> sets NX_LANG_ID; fails when zero or several build files
 # are present (ambiguous projects must never be silently mis-built).
@@ -43,9 +44,11 @@ build_language() {  # build_language LANG -> executes the real build system
             else
                 npm install --no-audit --no-fund || die "Build failed (npm install)."
             fi
-            [ -f src/main.js ] && node --check src/main.js \
-                && stage "Compiling... done (syntax check OK)" \
-                || die "src/main.js not found or invalid JavaScript."
+            if [ -f src/main.js ] && node --check src/main.js; then
+                stage "Compiling... done (syntax check OK)"
+            else
+                die "src/main.js not found or invalid JavaScript."
+            fi
             ;;
         rust)
             command -v cargo >/dev/null 2>&1 || die "cargo is not installed. Install Rust first."
@@ -63,9 +66,11 @@ build_language() {  # build_language LANG -> executes the real build system
             stage "Compiling (bytecode + wheel)..."
             python3 -m compileall -q src || die "Python sources do not compile."
             if python3 -m pip --version >/dev/null 2>&1; then
-                python3 -m pip wheel --no-deps -w build-wheel . >/dev/null 2>&1 \
-                    && stage "Wheel built: build-wheel/" \
-                    || msg "note: wheel build skipped (packaging backend missing)"
+                if python3 -m pip wheel --no-deps -w build-wheel . >/dev/null 2>&1; then
+                    stage "Wheel built: build-wheel/"
+                else
+                    msg "note: wheel build skipped (packaging backend missing)"
+                fi
             fi
             ;;
         go)

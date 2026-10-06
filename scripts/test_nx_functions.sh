@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1090,SC1091,SC2012,SC2034,SC2086,SC2164,SC2295,SC2317
+# shellcheck disable=SC1090,SC1091,SC2012,SC2015,SC2016,SC2034,SC2086,SC2164,SC2295,SC2317
 # test_nx_functions.sh — functional tests for the NX Package System scripts.
 #
 # The Kotlin templates are extracted with scripts/extract_nx.py, then the
