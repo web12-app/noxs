@@ -118,7 +118,7 @@ mod tests {
         let mut block = vec![0u8; 512];
         block[..name.len()].copy_from_slice(name.as_bytes());
         block[100..108].copy_from_slice(format!("{:07o}", 0o644).as_bytes());
-        block[124..136].copy_from_slice(format!("{:011o}", size).as_bytes());
+        block[124..136].copy_from_slice(format!("{:011o}\0", size).as_bytes());
         block[156] = type_flag;
         block[157..157 + link.len()].copy_from_slice(link.as_bytes());
         block[257..262].copy_from_slice(b"ustar");
@@ -150,7 +150,8 @@ mod tests {
 
     #[test]
     fn rejects_escaping_symlink() {
-        let mut tar = header("usr/bin/bad", 0, 0x32, "../../etc/shadow");
+        // Three levels up from usr/bin climbs below the extraction root.
+        let mut tar = header("usr/bin/bad", 0, 0x32, "../../../etc/shadow");
         tar.extend_from_slice(&vec![0u8; 1536]);
         assert_eq!(validate_tar(&tar).unwrap_err(), Status::UnsafeArchive);
     }

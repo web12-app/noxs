@@ -27,28 +27,33 @@ impl Arch {
 }
 
 /// `<name>.nx.pkg.<version>[.<arch>].tar.xz` — the only accepted asset shape.
+/// The version carries dots, so the grammar is parsed positionally: optional
+/// arch suffix first, then the fixed `nx.pkg` marker, then MAJOR.MINOR.PATCH.
 pub fn valid_asset_name(asset: &str) -> bool {
     let Some(stripped) = asset.strip_suffix(".tar.xz") else {
         return false;
     };
     let parts: Vec<&str> = stripped.split('.').collect();
-    if parts.len() < 4 {
+    if parts.len() < 6 {
         return false;
     }
-    let name = parts[0];
-    if !valid_package_name(name) {
+    // Optional trailing architecture segment.
+    let (version_end, _has_arch) = match Arch::parse(parts[parts.len() - 1]) {
+        Some(_) => (parts.len() - 1, true),
+        None => (parts.len(), false),
+    };
+    // Base shape: <name>.nx.pkg.MAJOR.MINOR.PATCH (6 segments, no arch).
+    if version_end != 6 {
+        return false;
+    }
+    if !valid_package_name(parts[0]) {
         return false;
     }
     if parts[1] != "nx" || parts[2] != "pkg" {
         return false;
     }
-    if !validation::valid_semver(parts[3]) {
-        return false;
-    }
-    if parts.len() == 5 {
-        return Arch::parse(parts[4]).is_some();
-    }
-    parts.len() == 4
+    let semver = parts[3..version_end].join(".");
+    validation::valid_semver(&semver)
 }
 
 /// Package names: lowercase, no traversal, no shell metacharacters —

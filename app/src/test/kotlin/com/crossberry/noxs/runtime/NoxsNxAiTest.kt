@@ -46,7 +46,7 @@ class NoxsNxAiTest {
         assertTrue(nx.contains("nx_ai_cmd"))
     }
 
-    @Test fun `default model route is kilo-auto/free and provider is kilo`() {
+    @Test fun `default model route is kilo-auto-free with kilo provider`() {
         val paths = install()
         val agent = installed(paths, "usr/local/lib/noxs/ai/agent.py")
         assertTrue(agent.contains("\"model\": \"kilo-auto/free\""))

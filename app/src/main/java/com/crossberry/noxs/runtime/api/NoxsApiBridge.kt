@@ -47,7 +47,7 @@ object NoxsApi {
 }
 
 /** Hosts wire real implementations here; unwired operations answer UNSUPPORTED_OPERATION. */
-interface ApiPort {
+fun interface ApiPort {
     fun invoke(module: String, operation: String, packageId: String, arguments: Map<String, Any?>): Any?
 }
 

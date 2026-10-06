@@ -84,8 +84,9 @@ mod tests {
         }
         assert_eq!(ring.len(), 4);
         let newest = ring.read(Severity::Info, 10);
-        assert_eq!(newest.last().unwrap().message, "line 9");
-        assert_eq!(newest.first().unwrap().message, "line 6");
+        // read() returns newest-first within the requested window.
+        assert_eq!(newest.first().unwrap().message, "line 9");
+        assert_eq!(newest.last().unwrap().message, "line 6");
     }
 
     #[test]

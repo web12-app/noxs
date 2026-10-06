@@ -40,7 +40,7 @@ class NoxsUrlGuardTest {
     }
 
     @Test fun `structural garbage is rejected`() {
-        assertFalse(allowed(null))
+        assertFalse(NoxsUrlGuard.check(null) is NoxsUrlGuard.Decision.Allowed)
         assertFalse(allowed(""))
         assertFalse(allowed("   "))
         assertFalse(allowed("https://"))

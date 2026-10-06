@@ -93,7 +93,10 @@ mod tests {
     fn symlink_escapes_are_rejected() {
         assert_eq!(symlink_stays_inside("usr/bin", "lib/libz.so"), PathVerdict::Safe);
         assert_eq!(symlink_stays_inside("usr/bin", "../lib/x"), PathVerdict::Safe);
-        assert_eq!(symlink_stays_inside("usr/bin", "../../etc/shadow"), PathVerdict::Unsafe);
+        // Two levels up from usr/bin stays inside the root (root/usr/bin ->
+        // root/etc/shadow); three levels climb below it.
+        assert_eq!(symlink_stays_inside("usr/bin", "../../etc/shadow"), PathVerdict::Safe);
+        assert_eq!(symlink_stays_inside("usr/bin", "../../../etc/shadow"), PathVerdict::Unsafe);
         assert_eq!(symlink_stays_inside("usr/bin", "/etc/shadow"), PathVerdict::Unsafe);
     }
 }
