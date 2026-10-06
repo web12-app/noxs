@@ -29,6 +29,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -198,6 +201,7 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         applyTerminalSettings()
         wireTerminalToolbar()
         wireSearchBar()
+        binding.terminal.onToggleFullscreen = { toggleFullscreen() }
         binding.terminal.onIndicatorChanged = { label ->
             binding.btnTerminalLatest.text = label?.let { "↓ $it" } ?: getString(R.string.terminal_latest)
         }
@@ -345,6 +349,17 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     }
 
     private fun openTerminalLink(uri: String): Boolean {
+        // Real printed URLs (including localhost servers such as
+        // http://127.0.0.1:8080 or http://localhost:3000) open in the browser.
+        if (uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)) {
+            return try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
+                true
+            } catch (_: Exception) {
+                Toast.makeText(this, "No browser is available to open this link.", Toast.LENGTH_SHORT).show()
+                true
+            }
+        }
         val intent = when (uri) {
             WEBSITE_URL -> Intent(Intent.ACTION_VIEW, Uri.parse(WEBSITE_URL))
             SUPPORT_EMAIL -> Intent(Intent.ACTION_SENDTO, Uri.parse(SUPPORT_EMAIL))
@@ -356,6 +371,42 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         } catch (_: Exception) {
             Toast.makeText(this, "No compatible app is available to open this link.", Toast.LENGTH_SHORT).show()
             true
+        }
+    }
+
+    // ------------------------------------------------------------- full screen
+
+    /** Ctrl+F toggles between the normal chrome and an immersive terminal. */
+    private var fullscreenMode = false
+
+    private fun toggleFullscreen() {
+        fullscreenMode = !fullscreenMode
+        applyFullscreenUi()
+        Toast.makeText(
+            this,
+            if (fullscreenMode) R.string.terminal_fullscreen_enter else R.string.terminal_fullscreen_exit,
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun applyFullscreenUi() {
+        val chrome = if (fullscreenMode) View.GONE else View.VISIBLE
+        binding.statusBar.visibility = chrome
+        binding.actionsScroll.visibility = chrome
+        binding.sessionTabsScroll.visibility = chrome
+        // Full screen hides the optional toolbar; normal mode restores it
+        // exactly when the user enabled it in settings.
+        binding.terminalToolbarScroll.visibility =
+            if (!fullscreenMode && terminalSettings.showToolbar) View.VISIBLE else View.GONE
+        binding.extraKeys.visibility = chrome
+        WindowCompat.setDecorFitsSystemWindows(window, !fullscreenMode)
+        val controller = WindowInsetsControllerCompat(window, binding.root)
+        if (fullscreenMode) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -444,7 +495,8 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         popup.menu.add(0, MORE_CLEAR_SCROLLBACK, 0, getString(R.string.terminal_menu_clear_scrollback))
         popup.menu.add(0, MORE_SAVE_OUTPUT, 1, getString(R.string.terminal_menu_save_output))
         popup.menu.add(0, MORE_RESET_FONT, 2, getString(R.string.terminal_menu_reset_font))
-        popup.menu.add(0, MORE_SETTINGS, 3, getString(R.string.nav_settings))
+        popup.menu.add(0, MORE_TOGGLE_FULLSCREEN, 3, getString(R.string.terminal_menu_fullscreen))
+        popup.menu.add(0, MORE_SETTINGS, 4, getString(R.string.nav_settings))
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 MORE_CLEAR_SCROLLBACK -> {
@@ -457,6 +509,10 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
                 }
                 MORE_RESET_FONT -> {
                     binding.terminal.resetFontSize()
+                    true
+                }
+                MORE_TOGGLE_FULLSCREEN -> {
+                    toggleFullscreen()
                     true
                 }
                 MORE_SETTINGS -> {
@@ -993,6 +1049,11 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (fullscreenMode) {
+            // First back press leaves full screen instead of leaving the app.
+            toggleFullscreen()
+            return
+        }
         if (binding.drawer.isDrawerOpen(GravityCompat.START)) {
             binding.drawer.closeDrawer(GravityCompat.START)
         } else if (terminalSettings.confirmExit &&
@@ -1021,5 +1082,6 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         const val MORE_SAVE_OUTPUT = 302
         const val MORE_RESET_FONT = 303
         const val MORE_SETTINGS = 304
+        const val MORE_TOGGLE_FULLSCREEN = 305
     }
 }

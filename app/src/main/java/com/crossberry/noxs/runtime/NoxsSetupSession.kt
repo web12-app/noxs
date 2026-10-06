@@ -350,6 +350,103 @@ class NoxsSetupSession(
         }
     }
 
+    // ------------------------------------------------------------- docker
+
+    /**
+     * The 🐳 Docker section of the setup console: real package install,
+     * honest daemon probing, the Noxs compatibility mode and the real
+     * hello-world container test — streamed live, never blocking the UI and
+     * never failing the overall setup (Docker is optional/experimental).
+     */
+    private suspend fun runDockerSection() {
+        console("\r\n\u001b[1;36m🐳 Docker Setup\u001b[0m\r\n")
+        val aptReady = paths.aptReadyMarker.isFile
+        val docker = NoxsDockerSetup(paths, ProotLauncher(paths, NoxsResources(paths)), { cancelRequested })
+        val outcome = docker.run(aptReady, DockerEvents())
+        when (outcome.state) {
+            NoxsDockerCompat.State.READY -> {
+                console("\r\n\u001b[1;32m🐳 Docker is ready.\u001b[0m\r\n")
+                outcome.summary.forEach { console("  $it\r\n") }
+            }
+            NoxsDockerCompat.State.COMPATIBILITY -> {
+                console("\r\n\u001b[1;33m🐳 Docker Compatibility Mode\u001b[0m\r\n")
+                outcome.summary.forEach { console("  $it\r\n") }
+                console("\r\nReason: Android/proot restricts kernel networking and cgroup controls.\r\n")
+                console("Docker is running with Noxs compatibility mode.\r\n")
+            }
+            NoxsDockerCompat.State.INSTALLED_DAEMON_UNAVAILABLE -> {
+                console("\r\n\u001b[1;33mDocker daemon unavailable (a Noxs runtime limitation)\u001b[0m\r\n")
+                outcome.summary.forEach { console("  $it\r\n") }
+                outcome.detail.lineSequence().filter { it.isNotBlank() }.take(6).forEach {
+                    console("  $it\r\n")
+                }
+                console("Try later with: noxs docker start\r\n")
+            }
+            NoxsDockerCompat.State.INSTALL_FAILED -> {
+                console("\r\n\u001b[1;31mDocker installation failed (setup itself is complete)\u001b[0m\r\n")
+                outcome.detail.lineSequence().filter { it.isNotBlank() }.take(8).forEach {
+                    console("  $it\r\n")
+                }
+                console("Try later with: noxs docker install\r\n")
+            }
+            NoxsDockerCompat.State.NOT_INSTALLED -> {
+                console("\r\n\u001b[90mDocker setup skipped: \u001b[0m")
+                console(outcome.detail + "\r\n")
+            }
+        }
+    }
+
+    /** Renders Docker setup progress into the console (spinner + checklist). */
+    private inner class DockerEvents : NoxsDockerSetup.Events {
+        override fun onOp(name: String) {
+            setupActivityId?.let { center?.attachOutput(it, name) }
+            startOp(name, withSpinnerLine = true)
+        }
+
+        override fun onOpFinish(success: Boolean) {
+            closeOpLine(success)
+        }
+
+        override fun onCheck(row: NoxsDockerCompat.CheckRow) {
+            // Bake the live spinner line so the checklist row is permanent,
+            // then keep ticking the same operation below it.
+            if (liveLineActive) {
+                console("\r\n")
+                liveLineActive = false
+            }
+            val mark = if (row.ok == true) "✓" else if (row.ok == false) "✗" else "!"
+            val color = when {
+                row.ok == true -> "32"
+                row.ok == false && !row.limited -> "31"
+                else -> "33"
+            }
+            val text = buildString {
+                append("[").append(mark).append("] ").append(row.label)
+                val detail = row.detail.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+                if (detail.isNotBlank()) append(" — ").append(detail.take(140))
+            }
+            console("\u001b[${color}m$text\u001b[0m\r\n")
+            resumeOpTick()
+        }
+
+        override fun onLog(line: String) {
+            val hadSpinner = liveLineActive && liveLineIsSpinner
+            if (hadSpinner) {
+                console("\r\n")
+                liveLineActive = false
+            }
+            console("\u001b[90m  $line\u001b[0m\r\n")
+            resumeOpTick()
+        }
+
+        private fun resumeOpTick() {
+            if (opTracker.current != null) {
+                lastElapsedSeconds = -1L
+                tickLiveLine()
+            }
+        }
+    }
+
     private fun startInstall() {
         cancelRequested = false
         failureDetail = ""
@@ -391,6 +488,25 @@ class NoxsSetupSession(
             when (result) {
                 is NoxsInstaller.InstallResult.Success -> {
                     closeOpLine(success = true)
+                    // Optional/experimental Docker section: never fails setup.
+                    var cancelledDuringDocker = false
+                    try {
+                        runDockerSection()
+                    } catch (e: SetupCancelledException) {
+                        cancelledDuringDocker = true
+                    }
+                    if (cancelledDuringDocker) {
+                        abandonOpLine()
+                        NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
+                            NoxsSetupEventLog.CANCELLED, currentStep.takeIf { it > 0 },
+                            System.currentTimeMillis() - startedAtMs.get(),
+                            note = "cancelled during the Docker section"))
+                        setupActivityId?.let { center?.markStopped(it) }
+                        console("\u001b^C Setup stopped by user. The Linux environment is ready; Docker state is saved.\u001b\r\n")
+                        console("root@noxs:~# ")
+                        _state.value = State.CANCELLED
+                        return@launch
+                    }
                     NoxsSetupEventLog.append(eventFile, NoxsSetupEventLog.Event(
                         NoxsSetupEventLog.COMPLETED, elapsedMs = System.currentTimeMillis() - startedAtMs.get()))
                     setupActivityId?.let { center?.markCompleted(it) }

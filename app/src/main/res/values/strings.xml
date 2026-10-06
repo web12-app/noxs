@@ -263,6 +263,9 @@
     <string name="terminal_menu_clear_scrollback">Clear scrollback</string>
     <string name="terminal_menu_save_output">Save / share output</string>
     <string name="terminal_menu_reset_font">Reset font size</string>
+    <string name="terminal_menu_fullscreen">Full screen (Ctrl+F)</string>
+    <string name="terminal_fullscreen_enter">Full screen — press Ctrl+F to exit</string>
+    <string name="terminal_fullscreen_exit">Full screen off</string>
     <string name="terminal_exit_title">Leave Noxs?</string>
     <string name="terminal_exit_msg">A session is still running. Exit Noxs now?</string>
     <string name="status_proc_desc">Session process status</string>

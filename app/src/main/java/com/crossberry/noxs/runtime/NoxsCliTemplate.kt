@@ -13,6 +13,7 @@ object NoxsCliTemplate {
 #   noxs help
 #   noxs info
 #   noxs code install|start|stop|restart|status
+#   noxs docker install|start|stop|restart|status|info|test
 #   noxs storage [status|setup|map|repair|reset|ls|mkdir|cat|get|put|rm|cp|mv]
 #   noxs-service start|stop|restart|status [service]
 #   noxs-socket list|test <path>
@@ -73,7 +74,7 @@ code_start() {
         --disable-telemetry \
         --disable-update-check \
         "${'$'}CODE_WORKSPACE" > /var/log/noxs/code-server.log 2>&1 &
-    echo ${'$'}! > "${'$'}CODE_PID"
+    echo "${'$'}!" > "${'$'}CODE_PID"
     sleep 1
     if code_running; then
         msg "code-server started on http://${'$'}CODE_ADDR (local-only)"
@@ -299,6 +300,219 @@ storage_command() {
     esac
 }
 
+# ---------------------------------------------------------------- noxs docker
+
+DOCKER_STATE="/var/run/noxs/docker-state"
+DOCKER_PID="/var/run/noxs/dockerd.pid"
+DOCKER_LOG="/var/log/noxs/dockerd.log"
+
+docker_installed() {
+    [ -x /usr/bin/docker ]
+}
+
+docker_alive() {
+    timeout 10 sudo docker info >/dev/null 2>&1
+}
+
+docker_state_value() {
+    sed -n "s/^${'$'}1=//p" "${'$'}DOCKER_STATE" 2>/dev/null | head -1
+}
+
+docker_save_state() {
+    # Persist ONLY safe runtime facts (no credentials, ever).
+    mkdir -p /var/run/noxs
+    local containers="${'$'}{4:-$(docker_state_value containers)}"
+    {
+        echo "state=${'$'}1"
+        echo "mode=${'$'}2"
+        echo "daemon_running=${'$'}3"
+        [ -n "${'$'}containers" ] && echo "containers=${'$'}containers"
+        echo "updated=${'$'}(date +%s)"
+    } > "${'$'}DOCKER_STATE" 2>/dev/null || true
+}
+
+docker_classify_log() {
+    # Real dockerd failure classification — Android/proot runtime limitations.
+    if grep -qiE "failed to initialize nft|iptables.*(permission denied|operation not permitted)" "${'$'}DOCKER_LOG" 2>/dev/null; then
+        echo networking
+    elif grep -qiE "unable to find (memory|cpu|io|cpuset|pids) controller|cgroup.controllers.*permission denied" "${'$'}DOCKER_LOG" 2>/dev/null; then
+        echo cgroups
+    elif grep -qiE "overlay.*(permission denied|operation not permitted)|mount.*permission denied" "${'$'}DOCKER_LOG" 2>/dev/null; then
+        echo storage
+    else
+        echo unknown
+    fi
+}
+
+docker_wait_daemon() {
+    local i
+    for i in $(seq 1 15); do
+        if docker_alive; then return 0; fi
+        sleep 2
+    done
+    return 1
+}
+
+docker_start() {
+    if ! docker_installed; then
+        err "Docker is not installed — run: noxs docker install"
+        return 1
+    fi
+    if docker_alive; then
+        msg "Docker daemon is already running"
+        return 0
+    fi
+    mkdir -p /var/run/noxs /var/log/noxs
+    local mode_used="normal" rc=1
+    if [ "$(docker_state_value mode)" != "compatibility" ]; then
+        # One honest normal attempt (never repeatedly retried).
+        nohup sudo /usr/bin/dockerd > "${'$'}DOCKER_LOG" 2>&1 &
+        echo "${'$'}!" > "${'$'}DOCKER_PID"
+        if docker_wait_daemon; then rc=0; fi
+    fi
+    if [ ${'$'}rc -ne 0 ]; then
+        case "$(docker_classify_log)" in
+            networking|cgroups|storage)
+                msg "Android/proot restricts Docker $(docker_classify_log) — retrying in Noxs compatibility mode"
+                ;;
+            *)
+                msg "Default Docker startup failed — retrying in Noxs compatibility mode"
+                ;;
+        esac
+        mode_used="compatibility"
+        nohup sudo /usr/bin/dockerd --iptables=false --bridge=none > "${'$'}DOCKER_LOG" 2>&1 &
+        echo "${'$'}!" > "${'$'}DOCKER_PID"
+        if docker_wait_daemon; then rc=0; fi
+    fi
+    if [ ${'$'}rc -eq 0 ]; then
+        if [ "${'$'}mode_used" = "compatibility" ]; then
+            docker_save_state compatibility compatibility yes
+            msg "Docker daemon started (Noxs compatibility mode)"
+        else
+            docker_save_state ready normal yes
+            msg "Docker daemon started"
+        fi
+    else
+        docker_save_state daemon_unavailable compatibility no
+        err "Docker daemon could not start — a Noxs runtime limitation, not a broken installation"
+        err "Last daemon messages:"
+        tail -3 "${'$'}DOCKER_LOG" 2>/dev/null | sed 's/^/  /'
+        return 1
+    fi
+}
+
+docker_stop() {
+    local pid
+    pid="$(cat "${'$'}DOCKER_PID" 2>/dev/null)"
+    if [ -z "${'$'}pid" ] || ! kill -0 "${'$'}pid" 2>/dev/null; then
+        # The daemon may have been started by the Noxs app itself.
+        pid="$(pgrep -o -x dockerd 2>/dev/null)"
+    fi
+    if [ -z "${'$'}pid" ] || ! kill -0 "${'$'}pid" 2>/dev/null; then
+        msg "Docker daemon is not running"
+        rm -f "${'$'}DOCKER_PID"
+        docker_save_state stopped "$(docker_state_value mode)" no
+        return 0
+    fi
+    kill "${'$'}pid" 2>/dev/null
+    local i
+    for i in $(seq 1 10); do
+        kill -0 "${'$'}pid" 2>/dev/null || break
+        sleep 1
+    done
+    kill -9 "${'$'}pid" 2>/dev/null || true
+    rm -f "${'$'}DOCKER_PID"
+    docker_save_state stopped "$(docker_state_value mode)" no
+    msg "Docker daemon stopped"
+}
+
+docker_status() {
+    if ! docker_installed; then
+        echo "Docker CLI: not installed"
+        echo "Docker daemon: stopped"
+        echo "Storage: unavailable"
+        echo "Networking: unavailable"
+        echo "Containers: unsupported"
+        echo "Mode: not installed"
+        return 3
+    fi
+    echo "Docker CLI: installed"
+    if docker_alive; then
+        echo "Docker daemon: running"
+        local driver mode containers
+        driver="$(sudo docker info 2>/dev/null | sed -n 's/^ *Storage Driver: *//p' | head -1)"
+        if [ -n "${'$'}driver" ]; then
+            echo "Storage: available (${'$'}driver)"
+        else
+            echo "Storage: unavailable"
+        fi
+        mode="$(docker_state_value mode)"
+        containers="$(docker_state_value containers)"
+        if [ "${'$'}mode" = "compatibility" ]; then
+            echo "Networking: limited"
+            echo "Mode: compatibility"
+        else
+            echo "Networking: available"
+            echo "Mode: normal"
+        fi
+        case "${'$'}containers" in
+            supported|unsupported) echo "Containers: ${'$'}containers" ;;
+            *) echo "Containers: untested (run: noxs docker test)" ;;
+        esac
+    else
+        echo "Docker daemon: stopped"
+        echo "Storage: unavailable"
+        echo "Networking: unavailable"
+        echo "Containers: untested"
+        echo "Mode: stopped"
+        return 3
+    fi
+}
+
+docker_info() {
+    if ! docker_installed; then
+        err "Docker is not installed — run: noxs docker install"
+        return 1
+    fi
+    exec sudo docker info
+}
+
+docker_test() {
+    if ! docker_installed; then
+        err "Docker is not installed — run: noxs docker install"
+        return 1
+    fi
+    if ! docker_alive; then
+        err "Docker daemon is not running — start it first: noxs docker start"
+        return 1
+    fi
+    msg "Running the real container test (hello-world)…"
+    if sudo docker run --rm hello-world; then
+        docker_save_state "$(docker_state_value state)" "$(docker_state_value mode)" yes supported
+        msg "Container execution: supported"
+        return 0
+    fi
+    docker_save_state "$(docker_state_value state)" "$(docker_state_value mode)" yes unsupported
+    err "Container execution: unsupported on this Android kernel (a Noxs runtime limitation)"
+    return 1
+}
+
+docker_install() {
+    msg "Installing Docker from Debian repositories…"
+    export DEBIAN_FRONTEND=noninteractive
+    if ! sudo apt-get update; then
+        err "apt update failed — check the network connection"
+        return 1
+    fi
+    if ! sudo apt-get install --yes --no-install-recommends docker.io; then
+        err "Docker installation failed"
+        docker_save_state install_failed "" no
+        return 1
+    fi
+    docker --version
+    msg "Docker installed. Start it with: noxs docker start"
+}
+
 # ---------------------------------------------------------------- noxs info
 
 do_info() {
@@ -331,9 +545,21 @@ case "${'$'}{1:-help}" in
         shift
         storage_command "${'$'}@"
         ;;
+    docker)
+        case "${'$'}{2:-status}" in
+            install) docker_install ;;
+            start)   docker_start ;;
+            stop)    docker_stop ;;
+            restart) docker_stop; docker_start ;;
+            status)  docker_status ;;
+            info)    docker_info ;;
+            test)    docker_test ;;
+            *) err "usage: noxs docker install|start|stop|restart|status|info|test"; exit 2 ;;
+        esac
+        ;;
     info) do_info ;;
     help|--help|-h)
-        sed -n '2,18p' "${'$'}0"
+        sed -n '2,19p' "${'$'}0"
         ;;
     *)
         # Forward legacy aliases so 'noxs-service start ssh' works as 'noxs service'

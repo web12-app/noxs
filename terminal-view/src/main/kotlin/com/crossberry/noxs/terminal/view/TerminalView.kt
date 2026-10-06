@@ -46,10 +46,12 @@ import com.crossberry.noxs.terminal.emulator.TerminalSearchMatch
 import com.crossberry.noxs.terminal.emulator.TerminalSelection
 import com.crossberry.noxs.terminal.emulator.TerminalSelectionPoint
 import com.crossberry.noxs.terminal.emulator.TerminalSession
+import com.crossberry.noxs.terminal.emulator.TerminalTextLinks
 import com.crossberry.noxs.terminal.emulator.TerminalViewportState
 import com.crossberry.noxs.terminal.emulator.copyText
 import com.crossberry.noxs.terminal.emulator.resolveSelection
 import com.crossberry.noxs.terminal.emulator.selectAllText
+import com.crossberry.noxs.terminal.emulator.wordRangeAt
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -163,6 +165,8 @@ class TerminalView @JvmOverloads constructor(
     var onScreenUpdated: (() -> Unit)? = null
     var onSessionResized: ((rows: Int, cols: Int) -> Unit)? = null
     var onTerminalLinkClick: ((uri: String) -> Boolean)? = null
+    /** Ctrl+F pressed at the view level — the host toggles full screen. */
+    var onToggleFullscreen: (() -> Unit)? = null
     /** true when attached to the live bottom; used for the "Latest" affordance. */
     var onScrollStateChanged: ((atLiveBottom: Boolean) -> Unit)? = null
     /** Indicator text from the scroll model ("18 new lines" / "124 lines behind") or null. */
@@ -215,11 +219,19 @@ class TerminalView @JvmOverloads constructor(
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             val cell = cellAt(e.x, e.y)
-            val uri = cell?.let { terminalHyperlinkAt(it) }
+            // 1. Real OSC 8 hyperlinks, 2. plain printed URLs (localhost
+            // servers etc.), 3. otherwise a normal focus/keyboard tap.
+            val uri = cell?.let { terminalHyperlinkAt(it) } ?: cell?.let { plainUrlAt(it) }
             if (uri != null && onTerminalLinkClick?.invoke(uri) == true) return true
             requestFocus()
             showSoftInput()
             return true
+        }
+
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (!longPressSelectionEnabled) return false
+            val cell = cellAt(e.x, e.y) ?: return false
+            return selectWordAt(cell)
         }
 
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
@@ -250,7 +262,10 @@ class TerminalView @JvmOverloads constructor(
             val cell = cellAt(e.x, e.y) ?: return
             if (!gesturePolicy.onLongPress()) return
             if (hapticsEnabled) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            beginSelection(cell, e.x, e.y)
+            // Long-press selects the whole word under the finger, then drag
+            // adjusts — a plain tap-and-hold yields an immediately copyable
+            // word instead of a single character cell.
+            if (!beginWordSelection(cell, e.x, e.y)) beginSelection(cell, e.x, e.y)
         }
     })
 
@@ -401,6 +416,52 @@ class TerminalView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Long-press/double-tap entry: select the word under [cell] and raise the
+     * floating Copy toolbar right away. Returns false when the cell holds no
+     * word (empty padding area) so the caller can fall back to cell selection.
+     */
+    private fun beginWordSelection(cell: Cell, x: Float, y: Float): Boolean {
+        val emu = session?.emulator ?: return false
+        val range = synchronized(emu) {
+            emu.buffer.wordRangeAt(cell.point.lineIdentity, cell.column)
+        } ?: return false
+        selection = TerminalSelection(
+            TerminalSelectionPoint(cell.point.lineIdentity, range.first),
+            TerminalSelectionPoint(cell.point.lineIdentity, range.last)
+        )
+        // Keep the gesture live so dragging the same finger extends the
+        // selection from the nearer word end (updateSelectionFromPointer).
+        selectionGesture = true
+        draggingEndpoint = null
+        updatePointer(x, y)
+        parent?.requestDisallowInterceptTouchEvent(true)
+        actionMode?.finish()
+        startActionMode(callback, ActionMode.TYPE_FLOATING)?.let { actionMode = it }
+        actionMode?.invalidateContentRect()
+        invalidate()
+        return true
+    }
+
+    /** Double-tap word selection (reuses the long-press path). */
+    private fun selectWordAt(cell: Cell): Boolean = beginWordSelection(cell, 0f, 0f)
+
+    /**
+     * Detects a plain printed URL (http/https or loopback shorthand such as
+     * "localhost:8080") at [cell] by scanning the real line text. Only text
+     * genuinely present in the output is returned.
+     */
+    private fun plainUrlAt(cell: Cell): String? {
+        val emu = session?.emulator ?: return null
+        return synchronized(emu) {
+            val buffer = emu.buffer
+            val row = buffer.documentRowOf(cell.point.lineIdentity) ?: return@synchronized null
+            val line = buffer.documentLineAt(row) ?: return@synchronized null
+            val textIndex = TerminalTextLinks.cellColumnToTextIndex(line.chars, line.styles, cell.column)
+            TerminalTextLinks.findUrlAt(line.text(), textIndex)
+        }
+    }
+
     private fun updatePointer(x: Float, y: Float) {
         pointerX = x
         pointerY = y
@@ -411,7 +472,25 @@ class TerminalView @JvmOverloads constructor(
         val current = selection ?: return
         selection = when (draggingEndpoint) {
             SelectionEndpoint.ANCHOR -> current.copy(anchor = cell.point)
-            SelectionEndpoint.FOCUS, null -> current.copy(focus = cell.point)
+            SelectionEndpoint.FOCUS -> current.copy(focus = cell.point)
+            null -> {
+                // Free finger drag after a long-press word selection: extend
+                // whichever word end the finger has moved past, the way a
+                // platform text view behaves.
+                val emu = session?.emulator ?: return
+                val extendAnchor = synchronized(emu) {
+                    val pointerRow = emu.buffer.documentRowOf(cell.point.lineIdentity)
+                        ?: return@synchronized false
+                    val anchorRow = emu.buffer.documentRowOf(current.anchor.lineIdentity) ?: pointerRow
+                    val focusRow = emu.buffer.documentRowOf(current.focus.lineIdentity) ?: pointerRow
+                    fun atOrBefore(row: Int, col: Int) =
+                        row < pointerRow || (row == pointerRow && col <= cell.point.column)
+                    val focusBeforeFinger = atOrBefore(focusRow, current.focus.column)
+                    val anchorAfterFinger = !atOrBefore(anchorRow, current.anchor.column)
+                    anchorAfterFinger && !focusBeforeFinger
+                }
+                if (extendAnchor) current.copy(anchor = cell.point) else current.copy(focus = cell.point)
+            }
         }
         actionMode?.invalidateContentRect()
         invalidate()
@@ -500,8 +579,17 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun copySelectionToClipboard() {
-        val text = selectedText() ?: return
+        val text = selectedText()
+        if (text.isNullOrEmpty()) {
+            android.widget.Toast.makeText(context, "Nothing selected to copy", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         clipboard.setPrimaryClip(ClipData.newPlainText("noxs-selection", text))
+        android.widget.Toast.makeText(
+            context,
+            "Copied " + text.length + (if (text.length == 1) " character" else " characters"),
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun shareSelection() {
@@ -774,8 +862,13 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun pasteFromClipboard() {
-        val clip = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
+        val clip = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+        if (clip.isNullOrEmpty()) {
+            android.widget.Toast.makeText(context, "Clipboard is empty", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         session?.write(session?.emulator?.paste(clip) ?: return)
+        android.widget.Toast.makeText(context, "Pasted", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     fun selectionOrTranscriptText(): String =
@@ -1119,6 +1212,14 @@ class TerminalView @JvmOverloads constructor(
         if (ctrl && keyCode == KeyEvent.KEYCODE_V) {
             pasteFromClipboard()
             clearLatches()
+            return true
+        }
+
+        // Ctrl+F toggles full screen at the app level (never sent to the
+        // shell): first press enters, next press exits. The host decides.
+        if (ctrl && keyCode == KeyEvent.KEYCODE_F) {
+            clearLatches()
+            onToggleFullscreen?.invoke()
             return true
         }
 

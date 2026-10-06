@@ -72,6 +72,37 @@ fun TerminalSelection.copyText(buffer: TerminalBuffer): String? {
     }
 }
 
+/**
+ * Expands a tapped cell to the whole word (or whitespace run) it belongs to,
+ * the way mobile text views behave on long-press. Returns null when the cell
+ * holds no printable word content. Word selection makes Copy immediately
+ * useful: a plain long-press yields a copyable word instead of one character.
+ */
+fun TerminalBuffer.wordRangeAt(lineIdentity: Long, column: Int): IntRange? {
+    val row = documentRowOf(lineIdentity) ?: return null
+    val line = documentLineAt(row) ?: return null
+    val count = minOf(line.chars.size, line.styles.size)
+    if (count == 0) return null
+    var col = column.coerceIn(0, count - 1)
+    if (col < line.styles.size && TextStyle.isWideCont(line.styles[col])) {
+        // Tapped the continuation half of a wide glyph: use its first half.
+        col = (col - 1).coerceAtLeast(0)
+    }
+    val isWordCell: (Int) -> Boolean = { c ->
+        val ch = line.chars[c]
+        val cont = c < line.styles.size && TextStyle.isWideCont(line.styles[c])
+        cont || !ch.isWhitespace()
+    }
+    if (!isWordCell(col)) return null
+    var start = col
+    var end = col
+    while (start > 0 && isWordCell(start - 1)) start--
+    while (end < count - 1 && isWordCell(end + 1)) end++
+    // Trim trailing cell padding (NUL cells carry default styles).
+    while (end > start && line.chars[end] == ' ') end--
+    return start..end
+}
+
 /** Select all retained scrollback plus the meaningful part of the active screen. */
 fun TerminalBuffer.selectAllText(): TerminalSelection? {
     val rowCount = documentRowCount()

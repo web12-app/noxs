@@ -65,7 +65,8 @@ class DiagnosticsActivity : AppCompatActivity() {
             NoxsLog.snapshot().forEach { appendLine(it) }
         }
 
-        // Real probe: docker --version + docker info inside the sandbox.
+        // Real probe: docker --version + docker info inside the sandbox,
+        // enriched with the persisted Noxs Docker mode (safe facts only).
         lifecycleScope.launch {
             val report = runCatching {
                 val launcher = ProotLauncher(paths, NoxsResources(paths))
@@ -74,9 +75,21 @@ class DiagnosticsActivity : AppCompatActivity() {
                 NoxsDockerProbe.Report(false, "", false, "probe failed: ${it.message}")
             }
             if (isFinishing || isDestroyed) return@launch
+            val lines = NoxsDockerProbe.displayLines(report).toMutableList()
+            runCatching {
+                val stateFile = java.io.File(paths.rootfsNoxsRun, NoxsDockerSetup.STATE_FILE)
+                if (stateFile.isFile) {
+                    val persisted = NoxsDockerCompat.parseState(stateFile.readText())
+                    persisted.state?.let { lines.add("Noxs Docker state: ${it.key} (${it.label})") }
+                    if (persisted.mode.isNotBlank()) lines.add("Noxs Docker mode: ${persisted.mode}")
+                    lines.add("Managed daemon process: " +
+                        if (NoxsDockerRuntime.isDaemonProcessAlive) "alive" else "not running")
+                }
+            }
+            if (lines.isNotEmpty()) lines.add("  /var/log/noxs/dockerd.log holds the real daemon log")
             tv.text = tv.text.toString().replace(
                 "probing real docker state inside Debian…",
-                NoxsDockerProbe.displayLines(report).joinToString("\n"))
+                lines.joinToString("\n"))
         }
     }
 
