@@ -100,7 +100,7 @@ class NoxsApiBridgeTest {
     }
 
     @Test fun `permission self-query maps through the catalog`() {
-        val b = bridge()
+        val b = bridge(ports = mapOf("permissions" to ApiPort { _, _, _, _ -> mapOf("granted" to true) }))
         val response = b.handle(
             "tree", request(module = "permissions", operation = "query")
         )
@@ -120,7 +120,7 @@ class NoxsApiBridgeTest {
 
     @Test fun `unknown packages are denied`() {
         val b = bridge(known = setOf("tree"))
-        val response = b.handle("ghost", request(module = "window", operation = "open"))
+        val response = b.handle("ghost", request(packageId = "ghost", module = "window", operation = "open"))
         assertEquals(NoxsApi.ERR_PERMISSION_DENIED, errorOf(response).first)
     }
 
@@ -163,7 +163,13 @@ class NoxsApiBridgeTest {
     }
 
     @Test fun `terminal execution requires explicit permission (spec §13)`() {
-        val b = bridge() // no decisions recorded at all
+        // A fresh center with NO recorded decisions: absence is not access.
+        val fresh = NoxsPermissionCenter(
+            stateDir = temporary.newFolder("state-fresh"),
+            androidProbe = { true },
+            featureProbe = { true }
+        )
+        val b = bridge(fresh)
         val execute = b.handle("tree", request(module = "terminal", operation = "execute"))
         assertEquals(NoxsApi.ERR_PERMISSION_DENIED, errorOf(execute).first)
         val write = b.handle("tree", request(module = "terminal", operation = "write"))

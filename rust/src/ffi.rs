@@ -72,7 +72,12 @@ pub extern "C" fn noxs_tar_validate(data: *const u8, data_len: usize) -> i32 {
 
 /// Write the core description into `out`; returns the required length
 /// (callers can retry with a bigger buffer when it exceeds `out_len`).
+///
+/// # Safety
+/// The caller guarantees `out` points to `out_len` writable bytes; null or
+/// zero-length inputs are rejected inside.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn noxs_describe(out: *mut u8, out_len: usize) -> usize {
     let text = crate::runtime::describe();
     if out.is_null() {
