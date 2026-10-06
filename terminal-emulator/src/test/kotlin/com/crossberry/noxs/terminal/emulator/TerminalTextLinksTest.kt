@@ -68,13 +68,16 @@ class TerminalTextLinksTest {
 
     @Test
     fun cellColumnToTextIndexSkipsWideContinuations() {
+        // Cells: A(0) 字(1..2, cell 2 is the continuation) B(3)
         val chars = charArrayOf('A', '字', '\u0000', 'B')
         val styles = LongArray(4)
         styles[2] = TextStyle.wideContOf(styles[1])
+        assertEquals(0, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 0))
+        // Tapping the wide glyph or its continuation both map to the glyph.
         assertEquals(1, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 1))
-        assertEquals(2, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 2))
-        assertEquals(3, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 3))
-        assertEquals(3, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 4))
+        assertEquals(1, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 2))
+        assertEquals(2, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 3))
+        assertEquals(2, TerminalTextLinks.cellColumnToTextIndex(chars, styles, 9))
     }
 
     @Test

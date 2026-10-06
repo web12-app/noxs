@@ -346,7 +346,7 @@ docker_classify_log() {
 
 docker_wait_daemon() {
     local i
-    for i in $(seq 1 15); do
+    for _ in $(seq 1 15); do
         if docker_alive; then return 0; fi
         sleep 2
     done
@@ -416,7 +416,7 @@ docker_stop() {
     fi
     kill "${'$'}pid" 2>/dev/null
     local i
-    for i in $(seq 1 10); do
+    for _ in $(seq 1 10); do
         kill -0 "${'$'}pid" 2>/dev/null || break
         sleep 1
     done

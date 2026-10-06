@@ -82,14 +82,21 @@ object TerminalTextLinks {
     }
 
     /**
-     * Maps a terminal cell column to an index into the line's text, honoring
-     * wide characters (a wide glyph occupies two cells but one char).
+     * Maps a terminal cell column to the index in the line's text of the
+     * character rendered at that cell, honoring wide characters (a wide
+     * glyph occupies two cells but one char, so its continuation cell maps
+     * back to the glyph's own index).
      */
     fun cellColumnToTextIndex(chars: CharArray, styles: LongArray, column: Int): Int {
+        if (chars.isEmpty()) return 0
+        var cell = column.coerceIn(0, chars.size - 1)
+        if (cell > 0 && cell < styles.size && TextStyle.isWideCont(styles[cell])) {
+            // The tapped cell is the right half of a wide glyph.
+            cell -= 1
+        }
         var index = 0
-        val limit = column.coerceAtMost(chars.size)
-        for (cell in 0 until limit) {
-            if (cell < styles.size && TextStyle.isWideCont(styles[cell])) continue
+        for (c in 0 until cell) {
+            if (c < styles.size && TextStyle.isWideCont(styles[c])) continue
             index++
         }
         return index
