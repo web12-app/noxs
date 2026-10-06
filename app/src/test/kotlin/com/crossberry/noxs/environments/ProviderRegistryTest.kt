@@ -146,7 +146,7 @@ class PackageManagerAdaptersTest {
     @Test fun `pacman adapter never emits apt commands`() {
         val pacman = PacmanAdapter()
         assertEquals(listOf("/usr/bin/pacman", "-Sy", "--noconfirm"), pacman.update())
-        assertTrue(pacman.install("git").contains("pacman"))
+        assertTrue(pacman.install("git").any { it.contains("pacman") })
         assertTrue(pacman.install("git").none { it.contains("apt") })
         assertEquals(listOf("/usr/bin/pacman", "-Syu", "--noconfirm"), pacman.upgrade())
     }
@@ -182,11 +182,11 @@ class EnvironmentConfiguratorTest {
         val paths = com.crossberry.noxs.runtime.NoxsPaths(temporary.newFolder("env-${distro.id}"))
         paths.rootfs.mkdirs()
         // Minimal rootfs skeleton every configurator expects.
+        java.io.File(paths.rootfs, "etc/skel").mkdirs()
+        java.io.File(paths.rootfs, "usr/bin").mkdirs()
         java.io.File(paths.rootfs, "etc/passwd").writeText("root:x:0:0:root:/root:/bin/bash\n")
         java.io.File(paths.rootfs, "etc/shadow").writeText("root:!:19000:0:99999:7:::\n")
         java.io.File(paths.rootfs, "etc/group").writeText("root:x:0:\n")
-        java.io.File(paths.rootfs, "etc/skel").mkdirs()
-        java.io.File(paths.rootfs, "usr/bin").mkdirs()
         java.io.File(paths.rootfs, "etc/skel/.bashrc").writeText("# skel bashrc\n")
         if (distro.packageManager == PackageManagerKind.PACMAN) {
             java.io.File(paths.rootfs, "etc/pacman.conf").writeText("[options]\nHoldPkg = pacman glibc\n")
