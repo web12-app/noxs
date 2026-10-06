@@ -78,15 +78,16 @@ mod tests {
 
     #[test]
     fn ring_is_bounded_and_filters() {
-        let ring = LogRing::new(4);
-        for index in 0..10 {
+        // The ring enforces a minimum capacity of 16.
+        let ring = LogRing::new(16);
+        for index in 0..20 {
             ring.push(Severity::Info, "core", &format!("line {index}"));
         }
-        assert_eq!(ring.len(), 4);
+        assert_eq!(ring.len(), 16);
         let newest = ring.read(Severity::Info, 10);
         // read() returns newest-first within the requested window.
-        assert_eq!(newest.first().unwrap().message, "line 9");
-        assert_eq!(newest.last().unwrap().message, "line 6");
+        assert_eq!(newest.first().unwrap().message, "line 19");
+        assert_eq!(newest.last().unwrap().message, "line 10");
     }
 
     #[test]

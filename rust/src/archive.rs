@@ -117,7 +117,7 @@ mod tests {
     fn header(name: &str, size: u64, type_flag: u8, link: &str) -> Vec<u8> {
         let mut block = vec![0u8; 512];
         block[..name.len()].copy_from_slice(name.as_bytes());
-        block[100..108].copy_from_slice(format!("{:07o}", 0o644).as_bytes());
+        block[100..108].copy_from_slice(format!("{:07o}\0", 0o644).as_bytes());
         block[124..136].copy_from_slice(format!("{:011o}\0", size).as_bytes());
         block[156] = type_flag;
         block[157..157 + link.len()].copy_from_slice(link.as_bytes());

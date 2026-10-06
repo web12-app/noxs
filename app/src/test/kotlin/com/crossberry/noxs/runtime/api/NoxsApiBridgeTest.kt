@@ -1,5 +1,6 @@
 package com.crossberry.noxs.runtime.api
 
+import com.crossberry.noxs.runtime.NoxsPermissionCatalog
 import com.crossberry.noxs.runtime.NoxsPermissionCenter
 import com.crossberry.noxs.shared.MiniJson
 import java.io.File
@@ -27,12 +28,17 @@ class NoxsApiBridgeTest {
     @Before
     fun setUpCenter() {
         // The temporary root exists only after the rule runs — build the
-        // center here, never in a field initializer.
+        // center here, never in a field initializer. Grant every catalog
+        // permission so tests exercise the tool path, not the gate (the
+        // gate-specific tests deny explicitly).
         allGranted = NoxsPermissionCenter(
             stateDir = temporary.newFolder("state-all"),
             androidProbe = { true },
             featureProbe = { true }
         )
+        NoxsPermissionCatalog.ALL.forEach { permission ->
+            allGranted!!.grant(permission.id)
+        }
     }
 
     private fun bridge(
