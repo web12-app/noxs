@@ -160,6 +160,11 @@ class NoxsDockerSetup(
         return row
     }
 
+    private fun addRow(row: NoxsDockerCompat.CheckRow): NoxsDockerCompat.CheckRow {
+        rows += row
+        return row
+    }
+
     // -------------------------------------------------------------- entry
 
     suspend fun run(aptReady: Boolean, events: Events): Outcome = withContext(Dispatchers.IO) {
