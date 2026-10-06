@@ -200,11 +200,12 @@ class EnvironmentConfigurator(private val paths: NoxsPaths, private val distro: 
         // noxs user + bashrc (prompt host label parameterized).
         RootfsConfigurator.ensureNoxsUser(rootfs, distro.promptHost, distro.banner)
 
-        // Runtime state dirs.
+        // Runtime state dirs (host side too: proot binds paths.run).
         paths.rootfsRun.mkdirs()
         paths.rootfsVarRun.mkdirs()
         paths.rootfsNoxsRun.mkdirs()
         paths.rootfsHostRun.mkdirs()
+        paths.run.mkdirs()
         File(paths.run, "keep").writeText("host run dir\n")
 
         // Environment tag consumed by the runtime (family-aware gating, spec §62).
