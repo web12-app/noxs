@@ -268,7 +268,7 @@ class NoxsService : Service() {
     /** Hold while any session or tracked activity is running, release when idle. */
     internal fun refreshKeepAwake() {
         val shouldHold = keepAwakeEnabled() && !stoppingAll &&
-            ((sessions.isInitialized && sessions.sessions.value.isNotEmpty()) ||
+            ((this::sessions.isInitialized && sessions.sessions.value.isNotEmpty()) ||
                 (this::center.isInitialized && center.active().isNotEmpty()))
         if (!shouldHold) {
             releaseKeepAwake()
