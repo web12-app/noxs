@@ -44,6 +44,7 @@ import androidx.core.content.ContextCompat
 import com.crossberry.noxs.R
 import com.crossberry.noxs.runtime.NoxsPermissionCatalog
 import com.crossberry.noxs.runtime.NoxsPermissionCenter
+import com.crossberry.noxs.runtime.NoxsService
 
 class PermissionCenterActivity : AppCompatActivity() {
 
@@ -107,7 +108,7 @@ class PermissionCenterActivity : AppCompatActivity() {
 
         val search = EditText(this).apply {
             hint = getString(R.string.perm_search_hint)
-            singleLine = true
+            setSingleLine(true)
             textSize = 13f
             setTextColor(Color.WHITE)
             background = GradientDrawable().apply {

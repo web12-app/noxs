@@ -17,8 +17,8 @@ package com.crossberry.noxs.runtime
 object NoxsNxAiLib {
 
     val AI_LIB = """# ai-lib.sh — nx ai entry (Noxs AI Agent Terminal)
-# Sourced by the nx dispatcher. The AI provider key, model and endpoint are
-# configured via ~/.noxs/ai/config.json or environment — never here.
+# shellcheck shell=bash disable=SC2153
+# Sourced by the nx dispatcher (NX_LIB_DIR comes from the dispatcher).
 
 NX_AI_DIR="§{NX_AI_DIR:-/usr/local/lib/noxs/ai}"
 

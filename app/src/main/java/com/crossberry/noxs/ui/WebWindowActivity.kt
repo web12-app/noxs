@@ -53,7 +53,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.crossberry.noxs.R
-import com.crossberry.noxs.runtime.NoxsLog
+import com.crossberry.noxs.shared.NoxsLog
 import com.crossberry.noxs.runtime.NoxsUrlGuard
 import com.crossberry.noxs.runtime.NoxsWebWindowManager
 
@@ -75,6 +75,7 @@ class WebWindowActivity : AppCompatActivity() {
 
     private var isFullscreenWindow = false
     private var savedCardParams: FrameLayout.LayoutParams? = null
+    private var hasSavedState = false
 
     private var uploadCallback: ValueCallback<Array<Uri>>? = null
 
@@ -82,6 +83,7 @@ class WebWindowActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        hasSavedState = savedInstanceState != null
 
         val requested = intent?.getStringExtra(EXTRA_URL).orEmpty()
         when (val decision = NoxsUrlGuard.check(requested)) {
@@ -137,13 +139,13 @@ class WebWindowActivity : AppCompatActivity() {
         return FrameLayout.LayoutParams(width, height, Gravity.CENTER)
     }
 
-    private fun chromeButton(label: String, contentDescription: String, onClick: () -> Unit): TextView =
+    private fun chromeButton(label: String, description: String, onClick: () -> Unit): TextView =
         TextView(this).apply {
             text = label
             textSize = 15f
             setTextColor(0xFFDCE3EC.toInt())
             typeface = Typeface.MONOSPACE
-            contentDescription = contentDescription
+            this.contentDescription = description
             setPadding((10 * dp).toInt(), (6 * dp).toInt(), (10 * dp).toInt(), (6 * dp).toInt())
             setOnClickListener { onClick() }
         }
@@ -195,7 +197,7 @@ class WebWindowActivity : AppCompatActivity() {
         }
         addressInput = EditText(this).apply {
             textSize = 13f
-            singleLine = true
+            setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_GO
             setTextColor(Color.WHITE)
             setHintTextColor(0xFF66707E.toInt())
@@ -231,7 +233,7 @@ class WebWindowActivity : AppCompatActivity() {
         webView.webViewClient = NoxsWebClient()
         webView.webChromeClient = NoxsChromeClient()
         webView.setDownloadListener(NoxsDownloadListener())
-        if (savedInstanceState == null) {
+        if (!hasSavedState) {
             webView.loadUrl(initialUrl)
         }
         restoreCookies()

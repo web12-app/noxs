@@ -148,7 +148,7 @@ mod tests {
     fn retry_gives_up_after_max_attempts() {
         let policy = RetryPolicy { max_attempts: 3, base_delay_ms: 1, max_delay_ms: 2 };
         let mut calls = 0;
-        let result = fetch_with_retry(&policy, &AtomicUsize::new(0), || {
+        let result: Option<u8> = fetch_with_retry(&policy, &AtomicUsize::new(0), || {
             calls += 1;
             None
         });

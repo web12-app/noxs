@@ -22,6 +22,7 @@ package com.crossberry.noxs.runtime
 object NoxsNxWebTemplate {
 
     val WEB_LIB = """# web-lib.sh — nx ow support (Noxs native browser bridge)
+# shellcheck shell=bash
 # Sourced by the nx dispatcher. Requires no external tools.
 
 NX_WEB_HOST="§{NX_WEB_HOST:-/var/run/noxs/host/web}"

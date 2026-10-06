@@ -15,6 +15,7 @@
  */
 package com.crossberry.noxs.runtime
 
+import com.crossberry.noxs.shared.NoxsLog
 import java.io.File
 
 class NoxsWebWindowBridge(private val paths: NoxsPaths) {
