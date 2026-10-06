@@ -172,7 +172,8 @@ object RootfsConfigurator {
             "pkg-init.sh" to NoxsNxPkgInit.PKG_INIT,
             "pkg-dev.sh" to NoxsNxPkgDev.PKG_DEV,
             "pkg-install.sh" to NoxsNxPkgInstall.PKG_INSTALL,
-            "web-lib.sh" to NoxsNxWebTemplate.WEB_LIB
+            "web-lib.sh" to NoxsNxWebTemplate.WEB_LIB,
+            "ai-lib.sh" to NoxsNxAiLib.AI_LIB
         ).forEach { (name, content) ->
             val f = File(libDir, name)
             writeFile(f, content)
@@ -208,8 +209,18 @@ object RootfsConfigurator {
         writeFile(File(apiDir, "nx-api.js"), NoxsNxApiTemplate.API_JS)
         writeFile(File(apiDir, "package.json"), NoxsNxApiTemplate.PACKAGE_JSON)
         writeFile(File(apiDir, "README.md"), NoxsNxApiTemplate.API_README)
+
+        // --- Noxs AI Agent runtime (nx ai) ---
+        val aiDir = File(rootfs, "usr/local/lib/noxs/ai")
+        if (!aiDir.isDirectory && !aiDir.mkdirs()) {
+            throw IllegalStateException("Cannot create ${aiDir.absolutePath}")
+        }
+        writeFile(File(aiDir, "provider.py"), NoxsNxAiProvider.AI_PROVIDER_PY)
+        writeFile(File(aiDir, "tools.py"), NoxsNxAiTools.AI_TOOLS_PY)
+        writeFile(File(aiDir, "agent.py"), NoxsNxAiAgent.AI_AGENT_PY)
         NoxsLog.i(
-            "RootfsConfig", "NX package system installed (nx + ${NoxsNxPackageTemplates.LANGUAGES.size} templates + nx-api)"
+            "RootfsConfig",
+            "NX package system installed (nx + ${NoxsNxPackageTemplates.LANGUAGES.size} templates + nx-api + ai)"
         )
     }
 
@@ -246,7 +257,7 @@ object RootfsConfigurator {
         installNxPackageSystem(rootfs)
     }
 
-    private val NX_PACKAGE_SYSTEM_VERSION = "2"
+    private val NX_PACKAGE_SYSTEM_VERSION = "3"
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

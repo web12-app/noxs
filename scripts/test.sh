@@ -6,6 +6,7 @@
 #   --sync-check    diff canonical linux-runtime files vs embedded app copies
 #   --scripts       shellcheck + bash -n over all shell tooling
 #   --nx            functional tests for the NX package system scripts
+#   --ai            offline functional tests for the Noxs AI Agent runtime
 #   --all           everything (default)
 set -uo pipefail
 
@@ -108,6 +109,16 @@ fi
 if [ "$MODE" = "--all" ] || [ "$MODE" = "--nx" ]; then
     step "nx package system functional tests"
     bash scripts/test_nx_functions.sh || fail "nx functional tests"
+fi
+
+# ---- ai agent -------------------------------------------------------------
+if [ "$MODE" = "--all" ] || [ "$MODE" = "--ai" ]; then
+    step "Noxs AI Agent functional tests (offline, fake provider)"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 scripts/test_nx_ai.py || fail "ai functional tests"
+    else
+        fail "python3 is required for the AI agent tests"
+    fi
 fi
 
 echo

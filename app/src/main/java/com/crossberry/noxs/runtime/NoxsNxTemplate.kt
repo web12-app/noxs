@@ -28,6 +28,7 @@ object NoxsNxTemplate {
 #   nx update [package]
 #   nx remove <package>
 #   nx ow <url>          Open a URL in the Noxs floating browser window
+#   nx ai [task]         Noxs AI Agent Terminal (interactive or one-shot)
 #
 # Every other command is forwarded to the noxs CLI, so all noxs commands
 # are allowed through nx as well:
@@ -63,6 +64,10 @@ Install commands:
 
 Web:
   nx ow <url>                          Open a URL in the Noxs browser window
+
+AI:
+  nx ai                                Interactive Noxs AI Agent (nx@ai>)
+  nx ai "task"                         One-shot task, then exit
 
 All noxs commands are also allowed here (nx <command> == noxs <command>):
   nx docker install | nx code start | nx storage status | nx help
@@ -139,6 +144,12 @@ case "§{1:-}" in
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/web-lib.sh"
         nx_ow_cmd "§@"
+        ;;
+    ai)
+        # Noxs AI Agent Terminal (Python runtime on the guest side).
+        # shellcheck source=/dev/null
+        . "§NX_LIB_DIR/ai-lib.sh"
+        nx_ai_cmd "§@"
         ;;
     install)
         # shellcheck source=/dev/null

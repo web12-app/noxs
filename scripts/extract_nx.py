@@ -23,12 +23,23 @@ SHELL_CONSTANTS = {
     "PKG_DEV": ("NoxsNxPkgDev.kt", "linux-runtime/nx/pkg-dev.sh"),
     "PKG_INSTALL": ("NoxsNxPkgInstall.kt", "linux-runtime/nx/pkg-install.sh"),
     "WEB_LIB": ("NoxsNxWebTemplate.kt", "linux-runtime/nx/web-lib.sh"),
+    "AI_LIB": ("NoxsNxAiLib.kt", "linux-runtime/nx/ai-lib.sh"),
 }
 
 WORKFLOW_FILE = "NoxsNxWorkflow.kt"
 TEMPLATES_FILE = "NoxsNxPackageTemplates.kt"
 API_TEMPLATES_FILE = "NoxsNxApiTemplate.kt"
 WEB_FILE = "NoxsNxWebTemplate.kt"
+AI_PROVIDER_FILE = "NoxsNxAiProvider.kt"
+AI_TOOLS_FILE = "NoxsNxAiTools.kt"
+AI_AGENT_FILE = "NoxsNxAiAgent.kt"
+
+# Python agent runtime files (no § expansion — plain Python).
+AI_PYTHON_MIRRORS = {
+    "AI_PROVIDER_PY": (AI_PROVIDER_FILE, "linux-runtime/nx/ai/provider.py"),
+    "AI_TOOLS_PY": (AI_TOOLS_FILE, "linux-runtime/nx/ai/tools.py"),
+    "AI_AGENT_PY": (AI_AGENT_FILE, "linux-runtime/nx/ai/agent.py"),
+}
 
 
 def _expand(raw: str) -> str:
@@ -48,7 +59,8 @@ def nx_constants(repo_root: pathlib.Path) -> dict:
     out = {}
     kt_files = sorted(
         {v[0] for v in SHELL_CONSTANTS.values()}
-        | {WORKFLOW_FILE, TEMPLATES_FILE, API_TEMPLATES_FILE, WEB_FILE}
+        | {WORKFLOW_FILE, TEMPLATES_FILE, API_TEMPLATES_FILE, WEB_FILE,
+           AI_PROVIDER_FILE, AI_TOOLS_FILE, AI_AGENT_FILE}
     )
     for kt in kt_files:
         text = _read(repo_root, kt)
@@ -89,6 +101,17 @@ def nx_template_files(repo_root: pathlib.Path) -> dict:
         files[f"templates/{lang}/files/.github/workflows/pkg.yml"] = workflow
         for name in commons:
             files[f"templates/{lang}/files/{name}"] = files[f"templates/_shared/{name}"]
+    return files
+
+
+def nx_ai_python_files(repo_root: pathlib.Path) -> dict:
+    """{mirror_relative_path: content} for the AI agent runtime (plain Python)."""
+    consts = nx_constants(repo_root)
+    files = {}
+    for const, (_kt, mirror) in AI_PYTHON_MIRRORS.items():
+        if const not in consts:
+            raise KeyError(f"AI constant {const} not found")
+        files[mirror] = consts[const]
     return files
 
 

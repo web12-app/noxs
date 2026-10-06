@@ -31,11 +31,17 @@ dest = pathlib.Path(sys.argv[2])
 for name, content, mirror in extract_nx.nx_shell_scripts(root):
     module = {'NX_CLI': 'bin/nx', 'PKG_LIB': 'noxs-pkg/pkg-lib.sh',
               'PKG_INIT': 'noxs-pkg/pkg-init.sh', 'PKG_DEV': 'noxs-pkg/pkg-dev.sh',
-              'PKG_INSTALL': 'noxs-pkg/pkg-install.sh', 'WEB_LIB': 'noxs-pkg/web-lib.sh'}[name]
+              'PKG_INSTALL': 'noxs-pkg/pkg-install.sh', 'WEB_LIB': 'noxs-pkg/web-lib.sh',
+              'AI_LIB': 'noxs-pkg/ai-lib.sh'}[name]
     target = dest / module
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
     target.chmod(0o755)
+for rel, content in extract_nx.nx_ai_python_files(root).items():
+    # linux-runtime/nx/ai/<file>.py -> dest/ai/<file>.py
+    target = dest / rel.split('linux-runtime/nx/')[1]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content)
 extract_nx.materialize_template_root(root, dest)
 print("  extracted nx scripts + templates")
 PY
@@ -303,6 +309,27 @@ echo "=== dispatcher: forwarding + help ==="
 "$NXBIN" help | grep -q "nx install" && pass "nx help" || fail "nx help"
 "$NXBIN" version | grep -q "nx 1" && pass "nx version" || fail "nx version"
 if "$NXBIN" pkg frobnicate >/dev/null 2>&1; then fail "unknown pkg subcommand rejected"; else pass "unknown pkg subcommand rejected"; fi
+
+# ---- ai dispatcher wiring ----------------------------------------------------
+echo "=== ai: dispatcher wiring ==="
+if [ -f "$NX_LIB_DIR/ai-lib.sh" ]; then pass "ai-lib.sh extracted"; else fail "ai-lib.sh extracted"; fi
+"$NXBIN" help | grep -q "nx ai" && pass "nx help mentions ai" || fail "nx help mentions ai"
+if [ ! -d "$TMP/nxroot/ai" ]; then fail "ai python runtime extracted"; else
+    for f in agent.py provider.py tools.py; do
+        [ -f "$TMP/nxroot/ai/$f" ] && pass "ai/$f extracted" || fail "ai/$f extracted"
+    done
+    python3 -m py_compile "$TMP/nxroot/ai/agent.py" "$TMP/nxroot/ai/provider.py" \
+        "$TMP/nxroot/ai/tools.py" \
+        && pass "ai python syntax" || fail "ai python syntax"
+    grep -q "kilo-auto/free" "$TMP/nxroot/ai/agent.py" \
+        && pass "default model kilo-auto/free" || fail "default model kilo-auto/free"
+    if grep -qE "sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}" "$TMP/nxroot/ai/agent.py" \
+        "$TMP/nxroot/ai/ai-lib.sh" "$TMP/nxroot/ai-lib.sh" 2>/dev/null; then
+        fail "no provider keys embedded"
+    else
+        pass "no provider keys embedded"
+    fi
+fi
 
 echo
 if [ "$RC" -eq 0 ]; then

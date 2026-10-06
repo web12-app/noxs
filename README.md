@@ -34,6 +34,10 @@ $ noxs code start               # code-server (VS Code in browser), 127.0.0.1:80
   with automatic GitHub Actions releases), `nx install tree`, versioned
   `.nx.pkg` artifacts, sha256-verified multi-arch builds (docs/PACKAGES.md).
   Every `noxs` command also works as `nx <command>`.
+- 🤖 **Noxs AI Agent Terminal** — `nx ai` opens an interactive `nx@ai>` agent
+  that plans multi-tool work (terminal, files, packages, processes, services),
+  runs independent tools in parallel, asks `Allow? [y/N]` for sensitive
+  actions and stays inside the Noxs security boundary (docs/AI-AGENT.md).
 - 🌐 **Noxs native browser** — `nx ow https://example.com` opens a real
   `android.webkit.WebView` inside a draggable Noxs floating window: URL
   validation, cookies, downloads, uploads, zero bridge exposure (docs/WEB-BROWSER.md).
@@ -65,13 +69,14 @@ noxs/
 ├── nx-pkg/                 Official package sources (tree · nxinfo · nxfetch)
 ├── nx-installer/           Verified setup installer for the nx runtime
 ├── linux-runtime/          bootstrap manifests, rootfs overlay, noxs CLI,
+│                           nx package CLI + AI agent runtime,
 │                           service/socket/process managers
 ├── sandbox/                sandbox docs (filesystem, users, permissions, sessions)
 ├── packages/               apt config, manifest schema, repository references
 ├── scripts/                bootstrap.sh · build-rootfs.sh · package.sh · test.sh
 ├── docs/                   ARCHITECTURE · BOOTSTRAP · ACTIVITY-CENTER · TERMINAL-UX · SECURITY ·
 │                           TESTING · UNIX-SOCKETS · PACKAGES · NX-API · PERMISSION-CENTER ·
-│                           WEB-BROWSER · RUST-CORE · NX-INSTALLER · FAQ
+│                           WEB-BROWSER · RUST-CORE · NX-INSTALLER · AI-AGENT · FAQ
 ├── .github/workflows/      android-ci.yml (build + validate + rust + release)
 │                           installer.yml (nx-installer release assets)
 └── LICENSE, NOTICE.md      Apache-2.0

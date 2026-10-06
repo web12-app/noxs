@@ -22,6 +22,8 @@ def expected_files(root: pathlib.Path):
         # template rel paths start with "templates/" -> mirror under
         # linux-runtime/nx/templates/
         out["linux-runtime/nx/" + rel] = content
+    for rel, content in extract_nx.nx_ai_python_files(root).items():
+        out[rel] = content
     # The § escape must be fully expanded everywhere: a leftover § means a
     # literal section-sign leaked into the artifact.
     for rel, content in out.items():
