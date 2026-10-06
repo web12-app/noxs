@@ -351,9 +351,11 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     private fun openTerminalLink(uri: String): Boolean {
         // Real printed URLs (including localhost servers such as
         // http://127.0.0.1:8080 or http://localhost:3000) open in the browser.
+        // Servers usually bind 0.0.0.0/:: — those hosts are normalized to the
+        // device loopback so the link works globally, not only in-terminal.
         if (uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)) {
             return try {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(TerminalLinks.normalize(uri))))
                 true
             } catch (_: Exception) {
                 Toast.makeText(this, "No browser is available to open this link.", Toast.LENGTH_SHORT).show()

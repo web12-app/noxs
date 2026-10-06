@@ -176,6 +176,8 @@
     <string name="settings_extra_keys">Show extra keys row</string>
     <string name="settings_volume_keys">Volume keys as arrows</string>
     <string name="settings_bell">Audible bell</string>
+    <string name="settings_section_background">Background</string>
+    <string name="settings_keep_awake">Keep CPU awake while running (servers stay reachable outside Noxs)</string>
     <string name="settings_max_sessions">Session quota</string>
     <string name="settings_max_procs">Process quota per session</string>
     <string name="settings_storage_warn">Storage warning threshold (MB)</string>

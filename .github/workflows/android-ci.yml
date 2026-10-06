@@ -92,6 +92,7 @@ jobs:
           scripts/test.sh --manifests
           scripts/test.sh --sync-check
           scripts/test.sh --scripts
+          scripts/test.sh --nx
 
       - name: Filesystem security tests (JVM)
         uses: actions/setup-java@v4

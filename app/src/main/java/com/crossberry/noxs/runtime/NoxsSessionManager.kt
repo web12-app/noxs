@@ -213,7 +213,17 @@ class NoxsSessionManager(
             return
         }
 
-        val exitNotice = "\r\n\u001b[1;33m[Process exited with code ${session.exitCode}]\u001b[0m\r\n"
+        val exitNotice = buildString {
+            append("\r\n\u001b[1;33m[Process exited with code ${session.exitCode}]\u001b[0m\r\n")
+            // A SIGKILL on the session child is almost always Android's memory
+            // / phantom-process management, not the user's shell. Say so and
+            // point at the fix instead of leaving a mysterious negative code.
+            if (session.exitCode == -9) {
+                append("\u001b[1;33m[The process was killed by Android (SIGKILL). " +
+                    "Background servers can be terminated this way — keep the Noxs " +
+                    "notification active and enable \u201cKeep CPU awake\u201d in Settings.]\u001b[0m\r\n")
+            }
+        }
         session.emulator.write(exitNotice.toByteArray(Charsets.UTF_8))
 
         // Reconcile the Activity Center record with the real outcome. A record

@@ -1,0 +1,12 @@
+{
+  "name": "__PKG_NAME__",
+  "description": "Noxs __PKG_NAME__ utility",
+  "latest": "1.0.0",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "tag": "__PKG_NAME__-v1.0.0",
+      "files": []
+    }
+  ]
+}

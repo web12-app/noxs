@@ -30,6 +30,10 @@ $ noxs code start               # code-server (VS Code in browser), 127.0.0.1:80
   original), colors/Unicode/scrollback/resize, multiple sessions.
 - 🧩 **code-server integration** — `noxs code install|start|stop|restart|status`,
   local-only by default.
+- 📦 **NX Package System** — `nx pkg init` (Node.js/Rust/C++/Python/Go templates
+  with automatic GitHub Actions releases), `nx install tree`, versioned
+  `.nx.pkg` artifacts, sha256-verified multi-arch builds (docs/PACKAGES.md).
+  Every `noxs` command also works as `nx <command>`.
 - 📊 **Resource quotas** — CPU/memory/process/session/storage limits that never
   override Android's own.
 - 🛡️ **Sandbox-first security** — SHA-256-pinned bootstrap, path-traversal-safe
@@ -50,7 +54,7 @@ noxs/
 ├── packages/               apt config, manifest schema, repository references
 ├── scripts/                bootstrap.sh · build-rootfs.sh · package.sh · test.sh
 ├── docs/                   ARCHITECTURE · BOOTSTRAP · ACTIVITY-CENTER · TERMINAL-UX · SECURITY ·
-│                           TESTING · UNIX-SOCKETS · FAQ
+│                           TESTING · UNIX-SOCKETS · PACKAGES · FAQ
 ├── .github/workflows/      android-ci.yml (build + validate + release)
 └── LICENSE, NOTICE.md      Apache-2.0
 ```

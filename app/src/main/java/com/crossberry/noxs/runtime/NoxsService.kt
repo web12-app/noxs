@@ -14,10 +14,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.crossberry.noxs.R
 import com.crossberry.noxs.shared.NoxsLog
@@ -42,6 +44,14 @@ class NoxsService : Service() {
     private var lastNotifyAt = 0L
     private var notifyPending = false
     private var stoppingAll = false
+
+    // Keep-awake: servers started inside a session must stay reachable while
+    // the user reads them in a browser (device-global localhost access).
+    // Without these locks the CPU/Wi-Fi can doze mid-request or Android can
+    // treat the runtime as idle, and "localhost:8080" stops loading even
+    // though the server process is alive. Gated by settings.keep_awake.
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -70,10 +80,22 @@ class NoxsService : Service() {
         running = this
         startForegroundCompat(1, buildLiveNotification())
         socketServer.start()
+        refreshKeepAwake()
+
+        // Migration: environments installed by earlier Noxs versions gain the
+        // `nx` package system (CLI + templates) without a reinstall. Cheap,
+        // idempotent, version-marker guarded — and it never gates the shell.
+        scope.launch(Dispatchers.IO) {
+            runCatching { RootfsConfigurator.ensureNxPackageSystem(paths) }
+                .onFailure { NoxsLog.w("NoxsService", "nx package system not installed: ${it.message}") }
+        }
 
         // Single source of truth: the notification mirrors the Activity Center.
         scope.launch {
-            center.records.collect { refreshNotificationThrottled() }
+            center.records.collect {
+                refreshNotificationThrottled()
+                refreshKeepAwake()
+            }
         }
         NoxsLog.i("NoxsService", "foreground service started")
     }
@@ -92,6 +114,7 @@ class NoxsService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        releaseKeepAwake()
         socketServer.stop()
         sessions.closeAll()
         // The service is going away: reconcile records so the Activity Center
@@ -137,6 +160,7 @@ class NoxsService : Service() {
     private fun stopEverythingGracefully() {
         if (stoppingAll) return
         stoppingAll = true
+        refreshKeepAwake()
         NoxsLog.i("NoxsService", "graceful stop requested")
         scope.launch(Dispatchers.IO) {
             sessions.closeAll()
@@ -236,6 +260,48 @@ class NoxsService : Service() {
         return builder.build()
     }
 
+    // ------------------------------------------------------------- keep awake
+
+    private fun keepAwakeEnabled(): Boolean =
+        getSharedPreferences("noxs_settings", Context.MODE_PRIVATE).getBoolean("keep_awake", true)
+
+    /** Hold while any session or tracked activity is running, release when idle. */
+    internal fun refreshKeepAwake() {
+        val shouldHold = keepAwakeEnabled() && !stoppingAll &&
+            ((sessions.isInitialized && sessions.sessions.value.isNotEmpty()) ||
+                (this::center.isInitialized && center.active().isNotEmpty()))
+        if (!shouldHold) {
+            releaseKeepAwake()
+            return
+        }
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (wakeLock == null) {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "noxs:runtime")
+                .apply { setReferenceCounted(false) }
+        }
+        // Long cap: re-armed on every activity/notification change; a lock that
+        // lapses is re-acquired on the next refresh, never silently forgotten.
+        runCatching { wakeLock?.acquire(6 * 60 * 60 * 1000L) }
+            .onFailure { NoxsLog.w("NoxsService", "wake lock unavailable: ${it.message}") }
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        if (wifiLock == null) {
+            val mode = if (Build.VERSION.SDK_INT >= 29) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = wm.createWifiLock(mode, "noxs:runtime")
+                .apply { setReferenceCounted(false) }
+        }
+        runCatching { wifiLock?.acquire() }
+            .onFailure { NoxsLog.w("NoxsService", "wifi lock unavailable: ${it.message}") }
+    }
+
+    private fun releaseKeepAwake() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }
+    }
+
     private fun startForegroundCompat(id: Int, notification: Notification) {
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -287,7 +353,10 @@ class NoxsService : Service() {
 
         /** Called by the session manager to refresh the notification. */
         fun notifySessionsChanged(count: Int) {
-            running?.let { it.refreshNotificationThrottled() }
+            running?.let {
+                it.refreshNotificationThrottled()
+                it.refreshKeepAwake()
+            }
         }
 
         /** Focus payload for notification Open taps. */
@@ -317,5 +386,10 @@ object RuntimeHolder {
         service = null
         sessions = null
         socketServer = null
+    }
+
+    /** Re-evaluate the keep-awake locks (e.g. after the user flips the setting). */
+    fun refreshKeepAwake() {
+        service?.refreshKeepAwake()
     }
 }

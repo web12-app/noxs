@@ -116,6 +116,16 @@ class SettingsActivity : AppCompatActivity() {
             switch(false) { prefs.edit().putBoolean("bell", it).apply() }
         )
 
+        // Background (localhost/server reachability outside the app)
+        stack.addView(label(getString(R.string.settings_section_background)))
+        addRow(
+            getString(R.string.settings_keep_awake),
+            switch(prefs.getBoolean("keep_awake", true)) {
+                prefs.edit().putBoolean("keep_awake", it).apply()
+                com.crossberry.noxs.runtime.RuntimeHolder.refreshKeepAwake()
+            }
+        )
+
         // Quotas (resources.conf inside the sandbox)
         val q = resources.load()
         addInput(getString(R.string.settings_max_sessions), q.maxSessions.toString(), false) {

@@ -106,6 +106,9 @@ object RootfsConfigurator {
         writeFile(cli, NOXS_CLI)
         cli.setExecutable(true, false)
 
+        // --- `nx` package CLI (NX Package System) ---
+        installNxPackageSystem(rootfs)
+
         val storageSetup = File(rootfs, "usr/local/bin/noxs-setup-storage")
         writeFile(storageSetup, NoxsCliTemplate.STORAGE_SETUP)
         storageSetup.setExecutable(true, false)
@@ -150,6 +153,88 @@ object RootfsConfigurator {
         }
         writeFile(File(sourceDir, "noxs.sources"), aptSources(useHttps))
     }
+
+    /**
+     * Install the `nx` CLI, the pkg modules and the language templates
+     * (NX Package System). Idempotent: safe to run on every configuration.
+     */
+    private fun installNxPackageSystem(rootfs: File) {
+        val nx = File(rootfs, "usr/local/bin/nx")
+        writeFile(nx, NoxsNxTemplate.NX_CLI)
+        nx.setExecutable(true, false)
+
+        val libDir = File(rootfs, "usr/local/lib/noxs-pkg")
+        if (!libDir.isDirectory && !libDir.mkdirs()) {
+            throw IllegalStateException("Cannot create ${libDir.absolutePath}")
+        }
+        listOf(
+            "pkg-lib.sh" to NoxsNxPkgLib.PKG_LIB,
+            "pkg-init.sh" to NoxsNxPkgInit.PKG_INIT,
+            "pkg-dev.sh" to NoxsNxPkgDev.PKG_DEV,
+            "pkg-install.sh" to NoxsNxPkgInstall.PKG_INSTALL
+        ).forEach { (name, content) ->
+            val f = File(libDir, name)
+            writeFile(f, content)
+            f.setExecutable(true, false)
+        }
+
+        val templateRoot = File(rootfs, "usr/local/share/noxs-pkg/templates")
+        NoxsNxPackageTemplates.FILES.forEach { (rel, content) ->
+            installNxTemplateFile(templateRoot, rel, content)
+        }
+        // Assemble complete per-language trees: every language gets the
+        // shared workflow + common metadata files inside its files/ dir so
+        // `nx pkg init` can copy one directory unmodified.
+        NoxsNxPackageTemplates.LANGUAGES.forEach { lang ->
+            val filesDir = File(templateRoot, "templates/$lang/files")
+            val workflowDir = File(filesDir, ".github/workflows")
+            if (!workflowDir.isDirectory && !workflowDir.mkdirs()) {
+                throw IllegalStateException("Cannot create ${workflowDir.absolutePath}")
+            }
+            val workflow = File(workflowDir, "pkg.yml")
+            writeFile(workflow, NoxsNxWorkflow.WORKFLOW_YML)
+            NoxsNxPackageTemplates.COMMON_FILES.forEach { name ->
+                writeFile(File(filesDir, name), NoxsNxPackageTemplates.FILES.getValue("templates/_shared/$name"))
+            }
+        }
+        writeFile(File(templateRoot.parentFile, ".nx-version"), "$NX_PACKAGE_SYSTEM_VERSION\n")
+        NoxsLog.i("RootfsConfig", "NX package system installed (nx + ${NoxsNxPackageTemplates.LANGUAGES.size} templates)")
+    }
+
+    /** Copy one template file; the key set is a compile-time constant, but
+     *  the relative path is still boundary-checked before touching disk. */
+    private fun installNxTemplateFile(templateRoot: File, rel: String, content: String) {
+        require(!rel.startsWith("/") && !rel.contains("..")) {
+            "Unsafe template path: $rel"
+        }
+        val f = File(templateRoot, rel)
+        f.parentFile?.let { parent ->
+            if (!parent.isDirectory && !parent.mkdirs()) {
+                throw IllegalStateException("Cannot create ${parent.absolutePath}")
+            }
+        }
+        writeFile(f, content)
+    }
+
+    /**
+     * Migration hook (spec §64 spirit): environments installed by earlier
+     * Noxs versions gain the `nx` package system without a reinstall. The
+     * version marker keeps the per-start cost to one stat + one read.
+     */
+    fun ensureNxPackageSystem(paths: NoxsPaths) {
+        val marker = File(paths.rootfs, "usr/local/share/noxs-pkg/.nx-version")
+        if (marker.isFile && marker.readText().trim() == NX_PACKAGE_SYSTEM_VERSION) return
+        val rootfs = paths.rootfs
+        listOf("usr/local/bin", "usr/local/lib").forEach { rel ->
+            val dir = File(rootfs, rel)
+            if (!dir.isDirectory && !dir.mkdirs()) {
+                throw IllegalStateException("Cannot create ${dir.absolutePath}")
+            }
+        }
+        installNxPackageSystem(rootfs)
+    }
+
+    private val NX_PACKAGE_SYSTEM_VERSION = "1"
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

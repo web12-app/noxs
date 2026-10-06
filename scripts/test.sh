@@ -5,6 +5,7 @@
 #   --manifests     validate bootstrap manifests + schema shape
 #   --sync-check    diff canonical linux-runtime files vs embedded app copies
 #   --scripts       shellcheck + bash -n over all shell tooling
+#   --nx            functional tests for the NX package system scripts
 #   --all           everything (default)
 set -uo pipefail
 
@@ -84,12 +85,14 @@ if embedded != canonical or storage_setup != canonical_setup:
     sys.exit(1)
 print('  OK noxs-cli and noxs-setup-storage match their templates')
 PY
+    # NX package system: every mirror must match its Kotlin template
+    python3 scripts/sync_nx.py --check || fail "nx mirror sync"
 fi
 
 # ---- shell tooling --------------------------------------------------------
 if [ "$MODE" = "--all" ] || [ "$MODE" = "--scripts" ]; then
     step "shell checks"
-    SHELLS="$(ls scripts/*.sh linux-runtime/launcher/noxs-launch.sh linux-runtime/launcher/noxs-cli linux-runtime/launcher/noxs-setup-storage linux-runtime/service-manager/noxs-service linux-runtime/socket-manager/noxs-socket linux-runtime/process-manager/noxs-ps 2>/dev/null)"
+    SHELLS="$(ls scripts/*.sh linux-runtime/launcher/noxs-launch.sh linux-runtime/launcher/noxs-cli linux-runtime/launcher/noxs-setup-storage linux-runtime/launcher/nx linux-runtime/nx/*.sh linux-runtime/service-manager/noxs-service linux-runtime/socket-manager/noxs-socket linux-runtime/process-manager/noxs-ps 2>/dev/null)"
     for f in $SHELLS; do
         bash -n "$f" || fail "syntax: $f"
     done
@@ -99,6 +102,12 @@ if [ "$MODE" = "--all" ] || [ "$MODE" = "--scripts" ]; then
     else
         echo "  shellcheck not installed — skipped locally (CI runs it)"
     fi
+fi
+
+# ---- nx package system ----------------------------------------------------
+if [ "$MODE" = "--all" ] || [ "$MODE" = "--nx" ]; then
+    step "nx package system functional tests"
+    bash scripts/test_nx_functions.sh || fail "nx functional tests"
 fi
 
 echo

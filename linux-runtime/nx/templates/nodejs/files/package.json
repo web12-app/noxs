@@ -1,0 +1,11 @@
+{
+  "name": "__PKG_NAME__",
+  "version": "1.0.0",
+  "private": true,
+  "bin": {
+    "__PKG_NAME__": "src/main.js"
+  },
+  "scripts": {
+    "start": "node src/main.js"
+  }
+}
