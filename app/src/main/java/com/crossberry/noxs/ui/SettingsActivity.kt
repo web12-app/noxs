@@ -84,6 +84,15 @@ class SettingsActivity : AppCompatActivity() {
         fun switch(initial: Boolean, onChange: (Boolean) -> Unit): SwitchMaterial =
             SwitchMaterial(this).apply { isChecked = initial; setOnCheckedChangeListener { _, c -> onChange(c) } }
 
+        // Linux Environment hub (spec §50): install/switch/remove environments
+        stack.addView(label(getString(R.string.settings_section_environment)))
+        stack.addView(SettingsWidgets.valueRow(
+            this,
+            getString(R.string.settings_environment_title),
+            getString(R.string.settings_environment_desc),
+            ""
+        ) { startActivity(android.content.Intent(this, EnvironmentManagerActivity::class.java)) })
+
         // Terminal hub (Appearance / Interaction / Scrolling / Behavior / Advanced)
         stack.addView(label(getString(R.string.settings_section_terminal)))
         stack.addView(SettingsWidgets.valueRow(

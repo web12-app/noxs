@@ -14,6 +14,7 @@ import com.crossberry.noxs.runtime.AndroidSignaller
 import com.crossberry.noxs.runtime.NoxsActivityCenter
 import com.crossberry.noxs.runtime.NoxsPaths
 import com.crossberry.noxs.runtime.NoxsSetupSession
+import com.crossberry.noxs.environments.NoxsEnvironmentManager
 import com.crossberry.noxs.shared.NoxsLog
 import java.io.File
 
@@ -21,6 +22,13 @@ class NoxsApplication : Application() {
 
     lateinit var paths: NoxsPaths
         private set
+
+    /**
+     * Multi-environment manager (spec §2, §63): provider registry, per-
+     * environment storage, active-environment switching and the legacy Debian
+     * import. Application-scoped so setup tasks survive Activity recreation.
+     */
+    val environments: NoxsEnvironmentManager by lazy { NoxsEnvironmentManager(this) }
 
     lateinit var activityCenter: NoxsActivityCenter
         private set

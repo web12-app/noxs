@@ -112,7 +112,7 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         setContentView(binding.root)
 
         val app = application as com.crossberry.noxs.NoxsApplication
-        paths = app.paths
+        paths = app.environments.activePaths()
         storageBridge = NoxsStorageBridge(this, paths)
         val savedStorageRequest = savedInstanceState?.getString(STATE_STORAGE_REQUEST_ID)
         val savedStorageCategory = savedInstanceState?.getString(STATE_STORAGE_CATEGORY)?.let { NoxsStorageBridge.Category.fromKey(it) }

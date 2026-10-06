@@ -119,6 +119,22 @@
             android:exported="false"
             android:label="@string/title_about" />
 
+        <!-- Multi-environment manager (spec §1, §34) -->
+        <activity
+            android:name=".ui.EnvironmentPickerActivity"
+            android:exported="false"
+            android:label="@string/env_welcome_title" />
+
+        <activity
+            android:name=".ui.EnvironmentInstallActivity"
+            android:exported="false"
+            android:label="@string/env_install_title" />
+
+        <activity
+            android:name=".ui.EnvironmentManagerActivity"
+            android:exported="false"
+            android:label="@string/env_manager_title" />
+
         <service
             android:name=".runtime.NoxsService"
             android:exported="false"

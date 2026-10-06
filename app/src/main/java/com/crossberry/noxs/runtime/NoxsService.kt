@@ -46,17 +46,23 @@ class NoxsService : Service() {
     override fun onCreate() {
         super.onCreate()
         val app = application as com.crossberry.noxs.NoxsApplication
-        paths = app.paths
+        // Multi-environment runtime (spec §32, §62): sessions, the control
+        // socket and proot all operate on the ACTIVE environment's storage.
+        paths = app.environments.activePaths()
         center = app.activityCenter
         // Security bootstrap (APT/CA/TLS repair) runs here in the service
         // background: it must never gate shell creation. The terminal always
-        // clears straight to an active shell while this runs.
+        // clears straight to an active shell while this runs. Only apt-family
+        // environments get the Debian APT bootstrap (spec §62 — no hard-coded
+        // Debian backend).
         resources = NoxsResources(paths)
         launcher = ProotLauncher(paths, resources)
         sessions = NoxsSessionManager(paths, launcher, resources, center)
         socketServer = NoxsSocketServer(paths, sessions)
         RuntimeHolder.set(this, sessions, socketServer)
-        NoxsAptSetup.startIfInstalled(paths, launcher, scope)
+        if (app.environments.activeFamilyIsApt()) {
+            NoxsAptSetup.startIfInstalled(paths, launcher, scope)
+        }
 
         center.stopHandler = { record -> performSafeStop(record) }
 
@@ -252,6 +258,16 @@ class NoxsService : Service() {
         private var running: NoxsService? = null
 
         fun start(context: Context) {
+            context.startForegroundService(Intent(context, NoxsService::class.java))
+        }
+
+        /**
+         * Restart so the runtime rebuilds against the newly active environment
+         * (spec §32). Sessions are closed by onDestroy — the confirm dialog in
+         * the environment manager warns the user before switching.
+         */
+        fun restart(context: Context) {
+            context.stopService(Intent(context, NoxsService::class.java))
             context.startForegroundService(Intent(context, NoxsService::class.java))
         }
 

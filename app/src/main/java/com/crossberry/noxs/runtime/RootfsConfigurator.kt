@@ -33,7 +33,21 @@ object RootfsConfigurator {
 
     fun configure(paths: NoxsPaths) = configure(paths, bootstrapHttpApt = false)
 
-    fun configure(paths: NoxsPaths, bootstrapHttpApt: Boolean) {
+    fun configure(paths: NoxsPaths, bootstrapHttpApt: Boolean) =
+        configure(paths, bootstrapHttpApt, hostLabel = "android")
+
+    /**
+     * [hostLabel] / [banner] / [hint] parameterize the shell prompt (noxs@debian,
+     * noxs@ubuntu … spec §61), the welcome banner and the first-steps hint while
+     * keeping the legacy Debian flow byte-identical via the defaults.
+     */
+    fun configure(
+        paths: NoxsPaths,
+        bootstrapHttpApt: Boolean,
+        hostLabel: String,
+        banner: String = "Noxs Debian 12 (bookworm)",
+        hint: String = "sudo apt update"
+    ) {
         val rootfs = paths.rootfs
 
         // --- Real directories first (usr/bin, usr/sbin, usr/lib BEFORE FHS links) ---
@@ -62,7 +76,7 @@ object RootfsConfigurator {
         }
 
         // --- profile.d/noxs.sh ---
-        writeFile(File(rootfs, "etc/profile.d/noxs.sh"), NOXS_PROFILE)
+        writeFile(File(rootfs, "etc/profile.d/noxs.sh"), noxsProfile(hostLabel))
         File(rootfs, "etc/profile.d/noxs.sh").setExecutable(false)
 
         // --- profile.d/noxs-pkg-guard.sh (package-manager serialization) ---
@@ -73,7 +87,7 @@ object RootfsConfigurator {
         writeFile(File(rootfs, "etc/environment"), ENVIRONMENT)
 
         // --- /etc/motd ---
-        writeFile(File(rootfs, "etc/motd"), motd())
+        writeFile(File(rootfs, "etc/motd"), motd(banner))
 
         // --- DNS ---
         if (!File(rootfs, "etc/resolv.conf").isFile || File(rootfs, "etc/resolv.conf").length() == 0L) {
@@ -106,7 +120,7 @@ object RootfsConfigurator {
         installSuAndSudo(rootfs)
 
         // --- Ensure `noxs` user and interactive bashrc prompt/banner ---
-        ensureNoxsUserAndBashrc(rootfs)
+        ensureNoxsUserAndBashrc(rootfs, hostLabel, banner, hint)
 
         NoxsLog.i("RootfsConfig", "Debian userspace configured")
     }
@@ -372,7 +386,12 @@ object RootfsConfigurator {
         sudoFile.setExecutable(true, false)
     }
 
-    private fun ensureNoxsUserAndBashrc(rootfs: File) {
+    private fun ensureNoxsUserAndBashrc(
+        rootfs: File,
+        hostLabel: String = "android",
+        banner: String = "Noxs Debian 12 (bookworm)",
+        hint: String = "sudo apt update"
+    ) {
         val etc = File(rootfs, "etc")
         val passwdFile = File(etc, "passwd")
         val groupFile = File(etc, "group")
@@ -431,7 +450,7 @@ object RootfsConfigurator {
         ).forEach { rc ->
             val existing = if (rc.isFile) rc.readText() else ""
             if (!existing.contains(marker)) {
-                writeFile(rc, existing.trimEnd() + "\n\n" + NOXS_BASHRC_SNIPPET + "\n")
+                writeFile(rc, existing.trimEnd() + "\n\n" + bashrcSnippet(hostLabel, banner, hint) + "\n")
             }
         }
     }
@@ -441,8 +460,8 @@ object RootfsConfigurator {
         f.writeText(content)
     }
 
-    private fun motd(): String = """
-        Welcome to Noxs (Debian 12 ${NoxsConstants.DEFAULT_DEBIAN_SUITE.replaceFirstChar { it.uppercase() }} userspace)
+    private fun motd(banner: String = "Noxs Debian 12 (bookworm)"): String = """
+        Welcome to Noxs ($banner userspace)
 
         * All operations run inside the Android app sandbox — you have full
           control of the Noxs Linux environment, not of the Android device.
@@ -503,14 +522,14 @@ object RootfsConfigurator {
         }
     """.trimIndent()
 
-    private val NOXS_PROFILE = """
+    private fun noxsProfile(hostLabel: String): String = """
         # /etc/profile.d/noxs.sh — Noxs environment integration
         export NOXS=1
         export NOXS_USER=${NoxsConstants.DEFAULT_USER}
         export NOXS_RUN_DIR=${NoxsConstants.NOXS_RUN_DIR}
         export NOXS_HOME=${NoxsConstants.DEFAULT_USER_HOME}
         export PATH="/usr/local/bin:${'$'}PATH"
-        export PS1='noxs@android:\w\$ '
+        export PS1='noxs@$hostLabel:\w\$ '
         export PS0=${'$'}'\033]133;C\a'
         PROMPT_COMMAND='printf "\033]133;A\007"'
         # recreate FHS links once (app storage cannot create symlinks directly)
@@ -525,7 +544,7 @@ object RootfsConfigurator {
         fi
     """.trimIndent()
 
-    private val NOXS_BASHRC_SNIPPET = """
+    private fun bashrcSnippet(hostLabel: String, banner: String, hint: String) = """
         # --- Noxs interactive shell setup ---
         unset LD_LIBRARY_PATH
         export NOXS=1
@@ -537,7 +556,7 @@ object RootfsConfigurator {
         else
             export USER="${'$'}{USER:-noxs}"
             export LOGNAME="${'$'}{LOGNAME:-noxs}"
-            export PS1='\[\033[01;32m\]noxs@android\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]$ '
+            export PS1='\[\033[01;32m\]noxs@$hostLabel\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]$ '
         fi
         # OSC 133 marks Bash's editable prompt; the terminal asks readline to
         # redisplay after background output arrives during command editing.
@@ -545,8 +564,8 @@ object RootfsConfigurator {
         PROMPT_COMMAND='printf "\033]133;A\007"'
         if [ -z "${'$'}{NOXS_BANNER_SHOWN:-}" ] && [ -t 1 ]; then
             export NOXS_BANNER_SHOWN=1
-            printf '\033[1;32mNoxs Debian 12 (bookworm)\033[0m — %s (%s)\n' "${'$'}(uname -sr 2>/dev/null || echo Linux)" "${'$'}(uname -m 2>/dev/null || echo arm64)"
-            printf 'Type \033[1;36mnoxs help\033[0m, \033[1;36mls -la\033[0m, or \033[1;36msudo apt update\033[0m.\n\n'
+            printf '\033[1;32m$banner\033[0m — %s (%s)\n' "${'$'}(uname -sr 2>/dev/null || echo Linux)" "${'$'}(uname -m 2>/dev/null || echo arm64)"
+            printf 'Type \033[1;36mnoxs help\033[0m, \033[1;36mls -la\033[0m, or \033[1;36m$hint\033[0m.\n\n'
         fi
     """.trimIndent()
 
@@ -712,4 +731,26 @@ object RootfsConfigurator {
      * (CI diff-checks the asset copy against it).
      */
     val NOXS_CLI = NoxsCliTemplate.CLI
+
+    // ------------------------------------------------- multi-environment hooks
+    // Internal (same Gradle module) accessors so the environments package can
+    // reuse the battle-tested primitives with distro-specific parameters
+    // instead of duplicating them. The legacy Debian path is untouched.
+
+    internal fun ensureFhsLink(rootfs: File, name: String, target: String) {
+        ensureSymlink(File(rootfs, name), target)
+    }
+
+    internal fun installNoxsSuSudo(rootfs: File) {
+        installSuAndSudo(rootfs)
+    }
+
+    internal fun ensureNoxsUser(
+        rootfs: File,
+        hostLabel: String = "android",
+        banner: String = "Noxs Debian 12 (bookworm)",
+        hint: String = "sudo apt update"
+    ) {
+        ensureNoxsUserAndBashrc(rootfs, hostLabel, banner, hint)
+    }
 }

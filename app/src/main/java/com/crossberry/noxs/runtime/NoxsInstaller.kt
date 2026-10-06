@@ -72,6 +72,10 @@ class NoxsInstaller(
 
     var overrideRootfsUrl: String? = null
 
+    /** Shell prompt label + banner for the configured userspace (spec §61). */
+    var promptHostLabel: String = "android"
+    var distroBanner: String = "Noxs Debian 12 (bookworm)"
+
     suspend fun install(progress: Progress): InstallResult = withContext(Dispatchers.IO) {
         progress0 = progress
         try {
@@ -151,7 +155,12 @@ class NoxsInstaller(
             // during the CA-certificate bootstrap; final HTTPS is enabled later.
             checkCancelled()
             progress.onStep(7, R.string.setup_step_configure, "")
-            RootfsConfigurator.configure(context, paths, bootstrapHttpApt = true)
+            RootfsConfigurator.configure(
+                paths,
+                bootstrapHttpApt = true,
+                hostLabel = promptHostLabel,
+                banner = distroBanner
+            )
 
             // 8 — noxs user + password
             checkCancelled()

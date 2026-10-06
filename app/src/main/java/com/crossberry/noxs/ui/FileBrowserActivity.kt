@@ -31,7 +31,7 @@ class FileBrowserActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityManagerBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        paths = (application as com.crossberry.noxs.NoxsApplication).paths
+        paths = (application as com.crossberry.noxs.NoxsApplication).environments.activePaths()
         cwd = paths.rootfsHomeNoxs.takeIf { it.isDirectory } ?: paths.rootfs
 
         binding.screenTitle.text = getString(R.string.title_file_browser)
