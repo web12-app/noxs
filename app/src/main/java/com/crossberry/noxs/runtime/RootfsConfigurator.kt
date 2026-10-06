@@ -21,6 +21,7 @@ import com.crossberry.noxs.shared.RootfsExtractor
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 
 object RootfsConfigurator {
 
@@ -170,14 +171,15 @@ object RootfsConfigurator {
             }
         }
         // dpkg keeps the installed-package database and its backups in this
-        // directory. Repair owner bits only on these known regular files.
+        // directory. Symlinks that appear here (status-old -> status shows up
+        // under some proot/filesystem combinations while dpkg rewrites its
+        // status database) are first normalized into real regular files;
+        // links resolving outside the rootfs are still refused.
         listOf("status", "status-old", "status-new").forEach { name ->
             val relative = "var/lib/dpkg/$name"
+            normalizeDpkgStateFile(paths, relative)
             assertDpkgPathContained(paths, relative)
             val file = File(paths.rootfs, relative)
-            if (Files.isSymbolicLink(file.toPath())) {
-                throw IllegalStateException("Refusing symlink for dpkg database file: $name")
-            }
             if (!file.exists()) return@forEach
             if (!file.isFile) {
                 throw IllegalStateException("Refusing non-regular dpkg database file: $name")
@@ -193,6 +195,73 @@ object RootfsConfigurator {
             }
         }
         NoxsLog.i("RootfsConfig", "Repaired only dpkg/APT state owner permissions")
+    }
+
+    /**
+     * Replaces a dpkg database symlink with a real regular file so dpkg's
+     * rename-based status backup keeps working under proot. Internal links
+     * (for example status-old -> status) are materialized from their content;
+     * links resolving outside the rootfs are refused with a SecurityException.
+     */
+    private fun normalizeDpkgStateFile(paths: NoxsPaths, relative: String) {
+        val file = File(paths.rootfs, relative)
+        if (!Files.isSymbolicLink(file.toPath())) return
+        val root = paths.rootfs.canonicalFile.toPath()
+        val target = runCatching { Files.readSymbolicLink(file.toPath()).toString() }.getOrDefault("")
+        val parent = requireNotNull(file.parentFile) { "dpkg state path has no parent: $relative" }
+        val resolved = if (target.startsWith("/")) {
+            // An absolute target can be a host-shaped link created outside the
+            // Noxs guest. If a real host file exists at that path and outside
+            // the rootfs, refuse; otherwise proot treats it as guest-absolute.
+            val asHost = File(target)
+            val hostOutside = asHost.exists() &&
+                !runCatching { asHost.canonicalFile.toPath().startsWith(root) }.getOrDefault(false)
+            if (hostOutside) {
+                throw SecurityException("dpkg state symlink escapes rootfs: $relative -> $target")
+            }
+            File(paths.rootfs, target.trimStart('/'))
+        } else {
+            File(parent, target)
+        }
+        val contained = runCatching { resolved.canonicalFile.toPath().startsWith(root) }.getOrDefault(false)
+        if (!contained) {
+            throw SecurityException("dpkg state symlink escapes rootfs: $relative -> $target")
+        }
+        val replacement = materializeDpkgStateContent(file, resolved)
+        if (file.name == "status" && replacement.isEmpty()) {
+            throw IllegalStateException("dpkg status database is a dangling symlink: $relative -> $target")
+        }
+        val temp = File(parent, "${file.name}.noxs-repair")
+        try {
+            temp.writeBytes(replacement)
+            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            NoxsLog.i("RootfsConfig", "Normalized dpkg state symlink: $relative -> $target")
+        } finally {
+            if (temp.exists()) temp.delete()
+        }
+    }
+
+    /**
+     * Content for the normalized dpkg state file: the link target's bytes, or
+     * the sibling dpkg backup when the target is dangling, or an empty file
+     * dpkg safely rewrites on its next status update.
+     */
+    private fun materializeDpkgStateContent(file: File, resolved: File): ByteArray {
+        val fromTarget = runCatching {
+            if (Files.isRegularFile(resolved.toPath())) Files.readAllBytes(resolved.toPath()) else null
+        }.getOrNull()
+        if (fromTarget != null) return fromTarget
+        val sibling = when (file.name) {
+            "status" -> File(file.parentFile, "status-old")
+            "status-old" -> File(file.parentFile, "status")
+            else -> null
+        }
+        val fromSibling = sibling?.let {
+            runCatching {
+                if (it.isFile && !Files.isSymbolicLink(it.toPath()) && it.length() > 0L) it.readBytes() else null
+            }.getOrNull()
+        }
+        return fromSibling ?: ByteArray(0)
     }
 
     /** Checks each component before mkdirs can follow or create through a symlink. */
