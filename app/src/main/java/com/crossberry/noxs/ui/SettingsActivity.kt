@@ -93,6 +93,15 @@ class SettingsActivity : AppCompatActivity() {
             ""
         ) { startActivity(android.content.Intent(this, EnvironmentManagerActivity::class.java)) })
 
+        // Permission Center (Noxs API spec §9) — permanent entry point.
+        stack.addView(label(getString(R.string.settings_section_permissions)))
+        stack.addView(SettingsWidgets.valueRow(
+            this,
+            getString(R.string.settings_permission_title),
+            getString(R.string.settings_permission_desc),
+            ""
+        ) { startActivity(android.content.Intent(this, PermissionCenterActivity::class.java)) })
+
         // Terminal hub (Appearance / Interaction / Scrolling / Behavior / Advanced)
         stack.addView(label(getString(R.string.settings_section_terminal)))
         stack.addView(SettingsWidgets.valueRow(

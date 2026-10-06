@@ -22,10 +22,13 @@ SHELL_CONSTANTS = {
     "PKG_INIT": ("NoxsNxPkgInit.kt", "linux-runtime/nx/pkg-init.sh"),
     "PKG_DEV": ("NoxsNxPkgDev.kt", "linux-runtime/nx/pkg-dev.sh"),
     "PKG_INSTALL": ("NoxsNxPkgInstall.kt", "linux-runtime/nx/pkg-install.sh"),
+    "WEB_LIB": ("NoxsNxWebTemplate.kt", "linux-runtime/nx/web-lib.sh"),
 }
 
 WORKFLOW_FILE = "NoxsNxWorkflow.kt"
 TEMPLATES_FILE = "NoxsNxPackageTemplates.kt"
+API_TEMPLATES_FILE = "NoxsNxApiTemplate.kt"
+WEB_FILE = "NoxsNxWebTemplate.kt"
 
 
 def _expand(raw: str) -> str:
@@ -43,7 +46,10 @@ def nx_constants(repo_root: pathlib.Path) -> dict:
     private per-file template constants (everything raw-string shaped).
     """
     out = {}
-    kt_files = sorted({v[0] for v in SHELL_CONSTANTS.values()} | {WORKFLOW_FILE, TEMPLATES_FILE})
+    kt_files = sorted(
+        {v[0] for v in SHELL_CONSTANTS.values()}
+        | {WORKFLOW_FILE, TEMPLATES_FILE, API_TEMPLATES_FILE, WEB_FILE}
+    )
     for kt in kt_files:
         text = _read(repo_root, kt)
         for m in re.finditer(r'val\s+(\w+)\s*=\s*"""(.*?)"""', text, re.S):

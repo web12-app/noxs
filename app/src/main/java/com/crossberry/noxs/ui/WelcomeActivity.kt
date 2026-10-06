@@ -42,8 +42,26 @@ class WelcomeActivity : AppCompatActivity() {
             )
         }
         binding.btnTerminal.setOnClickListener {
+            if (permissionOnboardingPending()) {
+                // First-launch flow (Noxs API spec §9): Permission Center ->
+                // verify -> Noxs Home. Runs once; afterwards the terminal
+                // opens directly.
+                NoxsService.start(this)
+                startActivity(
+                    Intent(this, PermissionCenterActivity::class.java)
+                        .putExtra(PermissionCenterActivity.EXTRA_FIRST_RUN, true)
+                )
+                return@setOnClickListener
+            }
             NoxsService.start(this)
             startActivity(Intent(this, TerminalActivity::class.java))
         }
+    }
+
+    private fun permissionOnboardingPending(): Boolean {
+        val prefs = getSharedPreferences("noxs_settings", MODE_PRIVATE)
+        if (prefs.getBoolean("permission_onboarding_done", false)) return false
+        prefs.edit().putBoolean("permission_onboarding_done", true).apply()
+        return true
     }
 }

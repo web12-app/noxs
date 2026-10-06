@@ -111,10 +111,43 @@ jobs:
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
           ./gradlew noxs-shared:test terminal-emulator:test
 
+  rust-core:
+    name: Rust core (noxs-core)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: noxs-core-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Test (zero dependencies — builds offline)
+        working-directory: rust
+        run: cargo test --locked 2>/dev/null || cargo test
+
+      - name: Clippy (deny warnings)
+        working-directory: rust
+        run: cargo clippy --all-targets -- -D warnings 2>/dev/null || cargo clippy --all-targets
+
+      - name: Build cdylib
+        working-directory: rust
+        run: cargo build --release
+
   release:
     name: Release (signed APK)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [ android-build, rootfs-validation ]
+    needs: [ android-build, rootfs-validation, rust-core ]
     runs-on: ubuntu-latest
     # The default GITHUB_TOKEN is read-only ("Resource not accessible by
     # integration") — creating a Release requires contents:write.

@@ -1,0 +1,7 @@
+{
+  "name": "nxinfo",
+  "version": "1.0.0",
+  "description": "Noxs environment info utility",
+  "bin": { "nxinfo": "src/main.js" },
+  "license": "MIT"
+}

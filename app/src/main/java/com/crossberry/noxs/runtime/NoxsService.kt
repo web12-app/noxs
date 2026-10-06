@@ -16,6 +16,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.FileObserver
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -23,6 +24,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.crossberry.noxs.R
 import com.crossberry.noxs.shared.NoxsLog
+import com.crossberry.noxs.ui.WebWindowActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +55,13 @@ class NoxsService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
+    // Guest→Android `nx ow` bridge: watches /var/run/noxs/host/web/requests
+    // while the service is alive, so `nx ow <url>` works device-globally —
+    // not only while a terminal screen is open.
+    private var webWindowBridge: NoxsWebWindowBridge? = null
+    private var webObserver: FileObserver? = null
+    private var webObservedPath: String? = null
+
     override fun onCreate() {
         super.onCreate()
         val app = application as com.crossberry.noxs.NoxsApplication
@@ -81,6 +90,7 @@ class NoxsService : Service() {
         startForegroundCompat(1, buildLiveNotification())
         socketServer.start()
         refreshKeepAwake()
+        startWebWindowBridge()
 
         // Migration: environments installed by earlier Noxs versions gain the
         // `nx` package system (CLI + templates) without a reinstall. Cheap,
@@ -113,8 +123,72 @@ class NoxsService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * `nx ow` support (Noxs platform spec §15): watch the web bridge request
+     * directory for the whole service lifetime. Requests are validated twice
+     * (guest CLI + NoxsUrlGuard) before a window opens.
+     */
+    private fun startWebWindowBridge() {
+        val bridge = NoxsWebWindowBridge(paths)
+        webWindowBridge = bridge
+        bridge.onOpenWebWindow = { _, url ->
+            mainHandler.post { openWebWindow(url) }
+        }
+        runCatching { bridge.ensureControlDirectories() }
+            .onFailure { NoxsLog.w("NoxsService", "web bridge unavailable: ${it.javaClass.simpleName}") }
+        armWebObserver(force = true)
+        scope.launch(Dispatchers.IO) {
+            runCatching { bridge.processPendingRequests() }
+        }
+    }
+
+    private fun armWebObserver(force: Boolean) {
+        val path = paths.webRequests.absolutePath
+        if (!force && webObserver != null && webObservedPath == path) return
+        webObserver?.stopWatching()
+        webObserver = null
+        webObservedPath = null
+        val requestMask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+        val invalidatedMask = FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
+        val observer = object : FileObserver(path, requestMask or invalidatedMask) {
+            override fun onEvent(event: Int, name: String?) {
+                if ((event and invalidatedMask) != 0) {
+                    mainHandler.post {
+                        webObserver?.stopWatching()
+                        webObserver = null
+                        webObservedPath = null
+                        runCatching { startWebWindowBridge() }
+                    }
+                    return
+                }
+                if (name == null || (event and requestMask) == 0) return
+                // Bridge file IO is tiny; a fresh thread keeps the main loop free.
+                scope.launch(Dispatchers.IO) {
+                    runCatching { webWindowBridge?.processPendingRequests() }
+                }
+            }
+        }
+        runCatching { observer.startWatching() }.onSuccess {
+            webObserver = observer
+            webObservedPath = path
+        }.onFailure {
+            NoxsLog.w("NoxsService", "cannot watch web bridge: ${it.javaClass.simpleName}")
+        }
+    }
+
+    private fun openWebWindow(url: String) {
+        val intent = Intent(this, WebWindowActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(WebWindowActivity.EXTRA_URL, url)
+        runCatching { startActivity(intent) }
+            .onFailure { NoxsLog.w("NoxsService", "web window launch failed: ${it.javaClass.simpleName}") }
+    }
+
     override fun onDestroy() {
         releaseKeepAwake()
+        webObserver?.stopWatching()
+        webObserver = null
+        webWindowBridge = null
         socketServer.stop()
         sessions.closeAll()
         // The service is going away: reconcile records so the Activity Center

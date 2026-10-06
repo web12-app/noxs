@@ -1,0 +1,23 @@
+[package]
+name = "noxs-core"
+version = "0.6.0"
+edition = "2021"
+description = "Noxs high-performance core: package engine, checksum verification, archive validation, secure extraction, task scheduling and security validation"
+license = "MIT"
+authors = ["Crossberry", "web12-app"]
+repository = "https://github.com/web12-app/noxs"
+
+# Deliberately zero external dependencies: the core builds offline, on any
+# architecture Noxs supports (aarch64, x86_64, armv7), and every line is
+# auditable in this repository. Platform transports (HTTPS, PTY) stay on the
+# Kotlin/C++ side; Rust owns validation, verification, packing, scheduling.
+[dependencies]
+
+[lib]
+name = "noxs_core"
+crate-type = ["lib", "cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"

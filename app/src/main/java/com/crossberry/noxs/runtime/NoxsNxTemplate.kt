@@ -27,6 +27,7 @@ object NoxsNxTemplate {
 #   nx info <installed-package>
 #   nx update [package]
 #   nx remove <package>
+#   nx ow <url>          Open a URL in the Noxs floating browser window
 #
 # Every other command is forwarded to the noxs CLI, so all noxs commands
 # are allowed through nx as well:
@@ -59,6 +60,9 @@ Install commands:
   nx info <package>                    Show details for an installed package
   nx update [package]                  Update installed packages
   nx remove <package>                  Remove an installed package
+
+Web:
+  nx ow <url>                          Open a URL in the Noxs browser window
 
 All noxs commands are also allowed here (nx <command> == noxs <command>):
   nx docker install | nx code start | nx storage status | nx help
@@ -129,6 +133,12 @@ case "§{1:-}" in
                 exit 2
                 ;;
         esac
+        ;;
+    ow)
+        # Noxs native browser window (real WebView on the Android side).
+        # shellcheck source=/dev/null
+        . "§NX_LIB_DIR/web-lib.sh"
+        nx_ow_cmd "§@"
         ;;
     install)
         # shellcheck source=/dev/null

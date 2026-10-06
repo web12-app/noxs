@@ -13,6 +13,7 @@ import android.os.Looper
 import com.crossberry.noxs.runtime.AndroidSignaller
 import com.crossberry.noxs.runtime.NoxsActivityCenter
 import com.crossberry.noxs.runtime.NoxsPaths
+import com.crossberry.noxs.runtime.NoxsPermissionCenter
 import com.crossberry.noxs.runtime.NoxsSetupSession
 import com.crossberry.noxs.environments.NoxsEnvironmentManager
 import com.crossberry.noxs.shared.NoxsLog
@@ -39,6 +40,25 @@ class NoxsApplication : Application() {
      * transitions, and the console reconnects to it from any Activity.
      */
     val setupSession: NoxsSetupSession by lazy { NoxsSetupSession(this, paths, activityCenter) }
+
+    /**
+     * Noxs Permission Center (Noxs API spec §6-§10): the single authority
+     * behind every privileged API call. Application-scoped so decisions are
+     * consistent across activities, services and the API bridge.
+     */
+    val permissionCenter: NoxsPermissionCenter by lazy {
+        NoxsPermissionCenter(
+            stateDir = File(filesDir, "noxs-settings"),
+            androidProbe = NoxsPermissionCenter.defaultProbe(this),
+            featureProbe = { permissionId ->
+                when (permissionId) {
+                    "background.keepawake" -> getSharedPreferences("noxs_settings", MODE_PRIVATE)
+                        .getBoolean("keep_awake", true)
+                    else -> false
+                }
+            }
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()

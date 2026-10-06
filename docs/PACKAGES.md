@@ -155,3 +155,20 @@ Languages are template directories under
 (language id, display name, supported architectures, build system) and a
 `files/` tree. Adding a language later means adding a directory — the
 package manager does not need to change.
+
+## Official packages (nx-pkg/)
+
+The `nx-pkg/` directory of this repository holds the sources of the
+official noxs-pkg packages — each subdirectory is published as its own
+public Git repository under `github.com/noxs-pkg/<name>`:
+
+| package   | language | what it does                    |
+|-----------|----------|---------------------------------|
+| `tree`    | C++      | directory tree printer          |
+| `nxinfo`  | Node.js  | Noxs environment info           |
+| `nxfetch` | Python   | compact system summary          |
+
+Each carries the full release automation (`.github/workflows/pkg.yml`,
+`registry.json`, `VERSION`) generated from the canonical Noxs templates, so
+`nx install tree` resolves, verifies and installs straight from that
+repository's releases. See `nx-pkg/README.md`.

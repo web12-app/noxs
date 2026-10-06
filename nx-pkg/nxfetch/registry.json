@@ -1,0 +1,12 @@
+{
+  "name": "nxfetch",
+  "description": "Noxs system fetch utility",
+  "latest": "1.0.0",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "tag": "nxfetch-v1.0.0",
+      "files": []
+    }
+  ]
+}

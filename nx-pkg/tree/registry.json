@@ -1,0 +1,12 @@
+{
+  "name": "tree",
+  "description": "Noxs directory tree utility",
+  "latest": "1.0.0",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "tag": "tree-v1.0.0",
+      "files": []
+    }
+  ]
+}

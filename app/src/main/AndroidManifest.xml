@@ -135,6 +135,18 @@
             android:exported="false"
             android:label="@string/env_manager_title" />
 
+        <activity
+            android:name=".ui.WebWindowActivity"
+            android:exported="false"
+            android:label="@string/title_web_window"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.PermissionCenterActivity"
+            android:exported="false"
+            android:label="@string/title_permission_center" />
+
         <service
             android:name=".runtime.NoxsService"
             android:exported="false"

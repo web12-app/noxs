@@ -436,4 +436,55 @@
     <string name="settings_environment_title">Environment Manager</string>
     <string name="settings_environment_desc">Install, switch or remove Linux environments</string>
 
+    <string name="settings_section_permissions">Permissions</string>
+    <string name="settings_permission_title">Permission Center</string>
+    <string name="settings_permission_desc">Review what Noxs and its packages may access</string>
+
+    <!-- Web window (Noxs native browser) -->
+    <string name="title_web_window">Noxs Web</string>
+    <string name="web_window_title">Noxs Web</string>
+    <string name="web_close_window">Close window</string>
+    <string name="web_minimize_window">Minimize window</string>
+    <string name="web_fullscreen_window">Fullscreen / restore window</string>
+    <string name="web_security_state">Connection security state</string>
+    <string name="web_address_hint">Search or enter address</string>
+    <string name="web_share">Share URL</string>
+    <string name="web_back">Back</string>
+    <string name="web_forward">Forward</string>
+    <string name="web_fullscreen_content">Fullscreen content</string>
+    <string name="web_reload">Reload page</string>
+    <string name="web_menu">Window menu</string>
+    <string name="web_restore_chip">Noxs Web — tap to restore</string>
+    <string name="web_loading">Loading…</string>
+    <string name="web_loading_percent">Loading… %1$d%%</string>
+    <string name="web_ready">Ready</string>
+    <string name="web_menu_close">Close window</string>
+    <string name="web_menu_minimize">Minimize</string>
+    <string name="web_menu_fullscreen_window">Fullscreen window</string>
+    <string name="web_close_confirm">Close this Noxs web window?</string>
+    <string name="web_close_yes">Close</string>
+    <string name="web_upload_picker">Choose file to upload</string>
+    <string name="web_download_blocked">Download blocked: unsafe URL or filename</string>
+    <string name="web_download_started">Downloading %1$s into Noxs storage</string>
+    <string name="web_download_failed">Download could not be started</string>
+
+    <!-- Permission Center -->
+    <string name="title_permission_center">Permission Center</string>
+    <string name="perm_search_hint">Search permissions…</string>
+    <string name="perm_continue">Continue to Noxs Home</string>
+    <string name="perm_network_title">Network</string>
+    <string name="perm_network_info">Internet access is enabled for Noxs.</string>
+    <string name="perm_state_allowed">Allowed</string>
+    <string name="perm_state_not_granted">Not granted</string>
+    <string name="perm_state_denied">Denied</string>
+    <string name="perm_state_restricted">Restricted</string>
+    <string name="perm_state_not_supported">Not supported</string>
+    <string name="perm_open_settings">Open Android settings</string>
+    <string name="perm_group_notifications">Notifications</string>
+    <string name="perm_group_storage">Storage / Files</string>
+    <string name="perm_group_background">Background activity</string>
+    <string name="perm_group_device">Device features</string>
+    <string name="perm_group_system">System integration</string>
+    <string name="perm_group_environment">Noxs environment access</string>
+
 </resources>

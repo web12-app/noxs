@@ -31,7 +31,7 @@ dest = pathlib.Path(sys.argv[2])
 for name, content, mirror in extract_nx.nx_shell_scripts(root):
     module = {'NX_CLI': 'bin/nx', 'PKG_LIB': 'noxs-pkg/pkg-lib.sh',
               'PKG_INIT': 'noxs-pkg/pkg-init.sh', 'PKG_DEV': 'noxs-pkg/pkg-dev.sh',
-              'PKG_INSTALL': 'noxs-pkg/pkg-install.sh'}[name]
+              'PKG_INSTALL': 'noxs-pkg/pkg-install.sh', 'WEB_LIB': 'noxs-pkg/web-lib.sh'}[name]
     target = dest / module
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
@@ -254,6 +254,49 @@ PY
 grep -q "Release already exists" "$WORK/demo/.github/workflows/pkg.yml" && pass "duplicate tag error" || fail "duplicate tag error"
 grep -q "sha256sum" "$WORK/demo/.github/workflows/pkg.yml" && pass "checksum step" || fail "checksum step"
 grep -q "\[skip ci\]" "$WORK/demo/.github/workflows/pkg.yml" && pass "[skip ci] registry commit" || fail "[skip ci]"
+
+# ---- web bridge: nx ow (Noxs native browser) -------------------------------
+echo "=== web-lib: URL policy + bridge ==="
+. "$NX_LIB_DIR/web-lib.sh"
+
+nx_url_ok "https://example.com" && pass "https accepted" || fail "https accepted"
+nx_url_ok "http://localhost:8080" && pass "http accepted" || fail "http accepted"
+if nx_url_ok "javascript:alert(1)"; then fail "javascript rejected"; else pass "javascript rejected"; fi
+if nx_url_ok "file:///etc/passwd"; then fail "file scheme rejected"; else pass "file scheme rejected"; fi
+if nx_url_ok "data:text/html,x"; then fail "data scheme rejected"; else pass "data scheme rejected"; fi
+if nx_url_ok "https://exa$(printf '\t')mple.com"; then fail "tab smuggle rejected"; else pass "tab smuggle rejected"; fi
+if nx_url_ok ""; then fail "empty rejected"; else pass "empty rejected"; fi
+if nx_url_ok "https://"; then fail "scheme-only rejected"; else pass "scheme-only rejected"; fi
+
+# End-to-end bridge: fake Android side answers the request file.
+WEBHOST="$TMP/webhost"
+mkdir -p "$WEBHOST/requests" "$WEBHOST/responses"
+(
+    export NX_WEB_HOST="$WEBHOST"
+    # Android-side responder: validate-ish answer for the single request.
+    ( while [ ! -d "$WEBHOST/done" ]; do
+          for req in "$WEBHOST"/requests/*; do
+              [ -f "$req" ] || continue
+              id="$(basename "$req")"
+              url="$(sed -n '2p' "$req")"
+              case "$url" in https://*) printf 'OK\nweb-test\n' > "$WEBHOST/responses/$id" ;;
+                  *) printf 'ERR\nUnsupported URL: only http:// and https:// can be opened\n' > "$WEBHOST/responses/$id" ;;
+              esac
+          done
+          sleep 0.05
+      done ) &
+    RESPONDER=$!
+    OUT="$(nx_ow_cmd "https://example.com" 2>&1)"
+    RC1=$?
+    mkdir -p "$WEBHOST/done"
+    wait "$RESPONDER" 2>/dev/null
+    [ "$RC1" -eq 0 ] && pass "nx_ow_cmd https round-trip ($OUT)" || fail "nx_ow_cmd https round-trip"
+    if OUT2="$(nx_ow_cmd "javascript:alert(1)" 2>&1)"; then
+        fail "nx_ow_cmd rejects javascript"
+    else
+        pass "nx_ow_cmd rejects javascript"
+    fi
+)
 
 # ---- dispatcher: noxs forward + help ----------------------------------------
 echo "=== dispatcher: forwarding + help ==="

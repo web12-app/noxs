@@ -34,6 +34,18 @@ $ noxs code start               # code-server (VS Code in browser), 127.0.0.1:80
   with automatic GitHub Actions releases), `nx install tree`, versioned
   `.nx.pkg` artifacts, sha256-verified multi-arch builds (docs/PACKAGES.md).
   Every `noxs` command also works as `nx <command>`.
+- 🌐 **Noxs native browser** — `nx ow https://example.com` opens a real
+  `android.webkit.WebView` inside a draggable Noxs floating window: URL
+  validation, cookies, downloads, uploads, zero bridge exposure (docs/WEB-BROWSER.md).
+- 🧠 **Noxs API + Permission Center** — `@noxs/nx-api` SDK behind the
+  permission manager; packages are isolated, requests are validated,
+  first-launch Permission Center with real Android state (docs/NX-API.md,
+  docs/PERMISSION-CENTER.md).
+- ⚙️ **Rust performance core** — `noxs-core` crate: SHA-256 verification,
+  tar safety walker, dependency resolver, task engine; stable C ABI with
+  pure-Kotlin fallback (docs/RUST-CORE.md).
+- 🧰 **nx-installer** — verified setup installer: download → sha256 →
+  staged install of the nx runtime from tagged releases (docs/NX-INSTALLER.md).
 - 📊 **Resource quotas** — CPU/memory/process/session/storage limits that never
   override Android's own.
 - 🛡️ **Sandbox-first security** — SHA-256-pinned bootstrap, path-traversal-safe
@@ -48,14 +60,20 @@ noxs/
 ├── terminal-emulator/      Clean-room VT/xterm engine (pure Kotlin, tested)
 ├── terminal-view/          Android terminal View + renderer + extra keys
 ├── noxs-shared/            Security core (checksums, TarGuard, users, quotas)
+├── rust/                   noxs-core — Rust performance core (checksum, archive,
+│                           tasks, security; stable FFI)
+├── nx-pkg/                 Official package sources (tree · nxinfo · nxfetch)
+├── nx-installer/           Verified setup installer for the nx runtime
 ├── linux-runtime/          bootstrap manifests, rootfs overlay, noxs CLI,
 │                           service/socket/process managers
 ├── sandbox/                sandbox docs (filesystem, users, permissions, sessions)
 ├── packages/               apt config, manifest schema, repository references
 ├── scripts/                bootstrap.sh · build-rootfs.sh · package.sh · test.sh
 ├── docs/                   ARCHITECTURE · BOOTSTRAP · ACTIVITY-CENTER · TERMINAL-UX · SECURITY ·
-│                           TESTING · UNIX-SOCKETS · PACKAGES · FAQ
-├── .github/workflows/      android-ci.yml (build + validate + release)
+│                           TESTING · UNIX-SOCKETS · PACKAGES · NX-API · PERMISSION-CENTER ·
+│                           WEB-BROWSER · RUST-CORE · NX-INSTALLER · FAQ
+├── .github/workflows/      android-ci.yml (build + validate + rust + release)
+│                           installer.yml (nx-installer release assets)
 └── LICENSE, NOTICE.md      Apache-2.0
 ```
 

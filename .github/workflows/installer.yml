@@ -1,0 +1,75 @@
+# nx-installer release automation (Noxs — original implementation).
+# On every v* tag this workflow packs the verified nx-installer payload and
+# attaches noxs-installer-<version>.tar.gz + .sha256 to the GitHub Release
+# next to the APKs. Payload content is always generated from the canonical
+# Kotlin templates (scripts/extract_payload.py) — never hand-edited copies.
+name: installer
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+    paths:
+      - "nx-installer/**"
+      - "scripts/extract_payload.py"
+      - "scripts/extract_nx.py"
+      - ".github/workflows/installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Pack nx-installer payload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(date +%Y.%m.%d)-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack payload
+        run: |
+          chmod +x nx-installer/build-installer.sh
+          ./nx-installer/build-installer.sh \
+            --version "${{ steps.version.outputs.version }}" \
+            --out nx-installer/dist
+
+      - name: Verify the packed payload round-trips
+        run: |
+          NAME="noxs-installer-${{ steps.version.outputs.version }}"
+          cd nx-installer/dist
+          sha256sum -c "$NAME.tar.gz.sha256"
+          WORK=$(mktemp -d)
+          tar -xzf "$NAME.tar.gz" -C "$WORK"
+          test -x "$WORK/payload/installer.sh"
+          test -x "$WORK/payload/bin/nx"
+          test -f "$WORK/payload/lib/noxs/nx-api/nx-api.js"
+          test -f "$WORK/payload/share/noxs-pkg/.nx-version"
+          echo "[installer] payload verified"
+
+      - name: Attach to release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            nx-installer/dist/noxs-installer-*.tar.gz
+            nx-installer/dist/noxs-installer-*.tar.gz.sha256
+          fail_on_unmatched_files: true
+
+      - name: Upload as artifact (non-tag builds)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: noxs-installer
+          path: nx-installer/dist/

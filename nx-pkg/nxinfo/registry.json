@@ -1,0 +1,12 @@
+{
+  "name": "nxinfo",
+  "description": "Noxs environment info utility",
+  "latest": "1.0.0",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "tag": "nxinfo-v1.0.0",
+      "files": []
+    }
+  ]
+}
