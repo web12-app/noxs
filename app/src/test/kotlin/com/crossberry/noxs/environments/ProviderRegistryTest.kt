@@ -3,6 +3,7 @@ package com.crossberry.noxs.environments
 import com.crossberry.noxs.environments.model.CompatibilityLevel
 import com.crossberry.noxs.environments.model.Environment
 import com.crossberry.noxs.environments.model.EnvironmentStatus
+import com.crossberry.noxs.environments.model.EnvJson
 import com.crossberry.noxs.environments.model.PackageManagerKind
 import com.crossberry.noxs.environments.providers.ArchProvider
 import com.crossberry.noxs.environments.providers.DistroSpecs
