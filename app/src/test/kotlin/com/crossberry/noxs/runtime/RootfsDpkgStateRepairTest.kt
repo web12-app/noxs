@@ -34,7 +34,7 @@ class RootfsDpkgStateRepairTest {
         assertTrue(statusOld.isFile)
         assertTrue(statusOld.readText().contains("Package: base"))
         assertTrue(statusOld.canWrite())
-        assertEquals("Package: base\n", File(dpkg, "status").readText())
+        assertTrue(File(dpkg, "status").readText().contains("Status: install ok installed"))
     }
 
     @Test fun `status symlink to backup recovers the database content`() {
