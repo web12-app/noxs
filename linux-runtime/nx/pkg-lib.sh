@@ -3,7 +3,9 @@
 # shellcheck shell=bash
 
 # Re-entry guard: modules source this lib freely.
-[ -n "${NX_LIB_LOADED:-}" ] && return 0 2>/dev/null || :
+if [ -n "${NX_LIB_LOADED:-}" ]; then
+    return 0
+fi
 NX_LIB_LOADED=1
 
 msg()      { printf 'nx: %s\n' "$*"; }
