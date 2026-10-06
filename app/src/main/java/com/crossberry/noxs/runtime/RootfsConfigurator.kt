@@ -180,7 +180,7 @@ object RootfsConfigurator {
             f.setExecutable(true, false)
         }
 
-        val templateRoot = File(rootfs, "usr/local/share/noxs-pkg/templates")
+        val templateRoot = File(rootfs, "usr/local/share/noxs-pkg")
         NoxsNxPackageTemplates.FILES.forEach { (rel, content) ->
             installNxTemplateFile(templateRoot, rel, content)
         }
@@ -199,7 +199,7 @@ object RootfsConfigurator {
                 writeFile(File(filesDir, name), NoxsNxPackageTemplates.FILES.getValue("templates/_shared/$name"))
             }
         }
-        writeFile(File(templateRoot.parentFile, ".nx-version"), "$NX_PACKAGE_SYSTEM_VERSION\n")
+        writeFile(File(templateRoot, ".nx-version"), "$NX_PACKAGE_SYSTEM_VERSION\n")
 
         // --- @noxs/nx-api SDK (Noxs API for NX packages) ---
         val apiDir = File(rootfs, "usr/local/lib/noxs/nx-api")
@@ -257,7 +257,7 @@ object RootfsConfigurator {
         installNxPackageSystem(rootfs)
     }
 
-    private val NX_PACKAGE_SYSTEM_VERSION = "3"
+    private val NX_PACKAGE_SYSTEM_VERSION = "4"
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

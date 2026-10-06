@@ -12,18 +12,18 @@ object NoxsNxAiTools {
 noxs-ai tools — the central Noxs Tool Registry (original Noxs implementation).
 
 Every tool defines: name, description, input schema, permission level,
-timeout, executor, result schema, cancellation + retry behavior (spec §5).
+timeout, executor, result schema, cancellation + retry behavior (spec section 5).
 
-Permission levels (spec §9):
+Permission levels (spec section 9):
     READ     — safe to execute, no user confirmation
     CONFIRM  — asks the user: Allow? [y/N] (never simulated by the model)
     DENY     — refused outright (bypass attempts, secrets, destructive ops)
 
-Tool results are normalized to the §16 format before they reach the model:
+Tool results are normalized to the section 16 format before they reach the model:
     {"success": true, "tool": ..., "exit_code": 0, "stdout": ..., ...}
 
 Reuse: process/service/package tools drive the existing noxs-service,
-noxs-ps, apt and nx install tooling instead of duplicating it (spec §31).
+noxs-ps, apt and nx install tooling instead of duplicating it (spec section 31).
 '''
 import fnmatch
 import json
@@ -48,7 +48,7 @@ MAX_LIST_ENTRIES = 500
 # ---------------------------------------------------------------- helpers
 
 def truncate_output(text, limit=MAX_TOOL_OUTPUT_DEFAULT):
-    '''Head+tail truncation so huge outputs never flood the model (§15).'''
+    '''Head+tail truncation so huge outputs never flood the model (section 15).'''
     text = text or ''
     if len(text) <= limit:
         return text
@@ -77,7 +77,7 @@ PROTECTED_FILE_PATTERNS = [
 
 def redact_secrets(text):
     '''Sensitive information is filtered before anything reaches the model
-    or the screen (spec §15, §19).'''
+    or the screen (spec section 15, section 19).'''
     for pattern in SECRET_PATTERNS:
         text = pattern.sub('[REDACTED]', text)
     return text
@@ -92,13 +92,13 @@ def _matches_any(path, patterns):
 
 
 def is_protected_path(path):
-    '''Credential/secret files the AI may never read or modify (§9 DENY).'''
+    '''Credential/secret files the AI may never read or modify (section 9 DENY).'''
     resolved = os.path.realpath(path)
     return _matches_any(resolved, PROTECTED_FILE_PATTERNS)
 
 
 class PathGuard:
-    '''Filesystem scope enforcement (spec §9-§10).
+    '''Filesystem scope enforcement (spec sections 9-10).
 
     READ: everywhere in the guest except protected secret files.
     WRITE: only inside allowed write roots (home, cwd, tmp) — never /etc,
@@ -148,7 +148,7 @@ class PathGuard:
 
 
 class CommandValidator:
-    '''terminal.run command safety (spec §10): blocklist + bounds.'''
+    '''terminal.run command safety (spec section 10): blocklist + bounds.'''
 
     FORBIDDEN = [
         re.compile(r'rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)*/\s*$'),
@@ -182,7 +182,7 @@ class CommandValidator:
 
 
 class ToolResult(dict):
-    '''Normalized result envelope (§16).'''
+    '''Normalized result envelope (section 16).'''
 
     @classmethod
     def success(cls, tool, stdout='', stderr='', exit_code=0, started=None):
@@ -257,7 +257,7 @@ class ToolRegistry:
         return [self._tools[name].schema() for name in sorted(self._tools)]
 
     def available_names(self):
-        '''Only tools that actually exist are ever offered (§24).'''
+        '''Only tools that actually exist are ever offered (section 24).'''
         return sorted(self._tools)
 
 
@@ -268,7 +268,7 @@ SAFE_ENV_BASE = ('PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'SHELL', 'USER', 'LOG
 
 def build_safe_env(extra=None):
     '''Minimal environment for tool subprocesses — unrestricted environment
-    variables are never passed through (§10, §19).'''
+    variables are never passed through (sections 10, 19).'''
     env = {key: os.environ[key] for key in SAFE_ENV_BASE if key in os.environ}
     env.setdefault('PATH', '/usr/local/bin:/usr/bin:/bin')
     env['NOXS_AI'] = '1'
@@ -317,7 +317,7 @@ ACTIVE_PROCESSES = set()
 
 
 def make_file_tools(guard):
-    '''Filesystem tools scoped by PathGuard (spec §9-§10, §18).'''
+    '''Filesystem tools scoped by PathGuard (spec sections 9-10, 18).'''
 
     def list_dir(args):
         path = guard.resolve(args.get('path') or '.')
@@ -533,7 +533,7 @@ def make_terminal_tools(guard, validator, session=None):
         return ToolResult.success('terminal.read', stdout='\n'.join(recent) or '(no recent terminal output)')
 
     def terminal_write(args):
-        # Writes into the user's terminal always need confirmation (§9).
+        # Writes into the user's terminal always need confirmation (section 9).
         text = str(args.get('text') or '')
         return ToolResult.success('terminal.write', stdout=text)
 
@@ -895,7 +895,7 @@ def make_noxs_tools(guard, session=None):
 def build_default_registry(cwd, session=None):
     '''The Noxs AI tool set. Tools that are unavailable in this environment
     still execute honestly — they fail with clear messages instead of being
-    fabricated (spec §24).'''
+    fabricated (spec section 24).'''
     guard = PathGuard(cwd)
     validator = CommandValidator()
     registry = ToolRegistry()

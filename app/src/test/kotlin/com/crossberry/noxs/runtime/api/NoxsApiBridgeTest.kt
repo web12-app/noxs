@@ -6,6 +6,7 @@ import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -21,14 +22,21 @@ class NoxsApiBridgeTest {
     @get:Rule
     val temporary = TemporaryFolder()
 
-    private val allGranted = NoxsPermissionCenter(
-        stateDir = temporary.newFolder("state-all"),
-        androidProbe = { true },
-        featureProbe = { true }
-    )
+    private var allGranted: NoxsPermissionCenter? = null
+
+    @Before
+    fun setUpCenter() {
+        // The temporary root exists only after the rule runs — build the
+        // center here, never in a field initializer.
+        allGranted = NoxsPermissionCenter(
+            stateDir = temporary.newFolder("state-all"),
+            androidProbe = { true },
+            featureProbe = { true }
+        )
+    }
 
     private fun bridge(
-        center: NoxsPermissionCenter = allGranted,
+        center: NoxsPermissionCenter = allGranted!!,
         ports: Map<String, ApiPort> = emptyMap(),
         known: Set<String> = emptySet()
     ): NoxsApiBridge = NoxsApiBridge(center, ports, known)

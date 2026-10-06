@@ -8,11 +8,11 @@ Boundaries enforced here (never in the model):
   - every tool call is validated against the registry before execution
   - CONFIRM-level tools ask the user: Allow? [y/N] — never simulated by the model
   - independent READ tools may run in parallel (bounded); everything else is
-    sequential, so dependent or conflicting actions can never race ($7-$8)
-  - agent limits (steps, tool calls, runtime) stop runaway loops safely ($17)
-  - tool output is truncated, secrets are redacted, context is compacted ($15)
+    sequential, so dependent or conflicting actions can never race (sections 7-8)
+  - agent limits (steps, tool calls, runtime) stop runaway loops safely (section 17)
+  - tool output is truncated, secrets are redacted, context is compacted (section 15)
   - Ctrl+C cancels the current request/tool and returns to nx@ai>
-  - Ctrl+D / exit ends the session and releases everything it owns ($20)
+  - Ctrl+D / exit ends the session and releases everything it owns (section 20)
 '''
 import argparse
 import json
@@ -142,7 +142,7 @@ You speak to the user with the "_>" prefix handled by the terminal; write plain 
 
 
 class ContextManager:
-    '''Conversation + tool results, bounded (spec $15).'''
+    '''Conversation + tool results, bounded (spec section 15).'''
 
     def __init__(self, system_prompt, max_tool_output=12000, compaction_threshold=60):
         self.system = {'role': 'system', 'content': system_prompt}
@@ -205,7 +205,7 @@ class AgentSession:
 # ------------------------------------------------------------------ logging
 
 def safe_log(log_path, session_id, event, **fields):
-    '''One line, no content, no secrets (spec $28).'''
+    '''One line, no content, no secrets (spec section 28).'''
     try:
         directory = os.path.dirname(log_path)
         if directory:
@@ -308,7 +308,7 @@ class AgentRuntime:
     # --------------------------------------------------------- permissions
 
     def confirm(self, tool, target_summary):
-        '''Confirmation is controlled by Noxs only (spec $9).'''
+        '''Confirmation is controlled by Noxs only (spec section 9).'''
         if self.auto_confirm:
             safe_log(self.log_path, self.session.id, 'confirm', tool=tool, result='auto')
             return True
@@ -331,7 +331,7 @@ class AgentRuntime:
     # ----------------------------------------------------------- execution
 
     def _validate_call(self, call):
-        '''Every tool call is validated before execution (spec $6).'''
+        '''Every tool call is validated before execution (spec section 6).'''
         name = call.get('function', {}).get('name', '')
         tool = self.registry.get(name)
         if tool is None:
@@ -405,7 +405,7 @@ class AgentRuntime:
 
     def execute_calls(self, calls):
         '''Parallel only when every call in the batch is independent READ-level
-        work; anything else runs sequentially so results can never race ($7).'''
+        work; anything else runs sequentially so results can never race (section 7).'''
         batch = [(call.get('id') or 'call_%d' % index, call)
                  for index, call in enumerate(calls)]
         permissions = []
@@ -607,7 +607,7 @@ class AgentRuntime:
             self.shutdown()
 
     def shutdown(self):
-        '''Release everything the session owns (spec $20).'''
+        '''Release everything the session owns (spec section 20).'''
         self.session.cancel_flag.cancel()
         for process in list(ACTIVE_PROCESSES):
             tools_mod.kill_process_group(process)
@@ -665,7 +665,7 @@ def main(argv=None):
 
 
 def handle_sigint(signum, frame):
-    '''Ctrl+C: cancel the current request/tool, return to nx@ai> (spec $1).
+    '''Ctrl+C: cancel the current request/tool, return to nx@ai> (spec section 1).
     KeyboardInterrupt inside input() behaves like the default handler; this
     hook covers agent turns by cancelling the cooperative flag and killing
     agent-owned subprocesses.'''

@@ -35,7 +35,7 @@ class NoxsUrlGuardTest {
         assertFalse(allowed("java\tscript:alert(1)"))
         assertFalse(allowed("java\nscript:alert(1)"))
         assertFalse(allowed(" JavaScript:x"))
-        assertFalse(allowed("  https://example.com  ")) // trimmed, still allowed
+        assertTrue(allowed("  https://example.com  ")) // input is trimmed, then allowed
         assertTrue(allowed("HTTPS://EXAMPLE.COM/PATH"))
     }
 

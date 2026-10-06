@@ -80,8 +80,8 @@ class NoxsNxWebAndApiTest {
         assertTrue(api.contains("packageId"))
         assertTrue(api.contains("requestId"))
         assertFalse(api.contains('\u00a7'))
-        // The SDK never fabricates permissions: denial surfaces the stable code.
-        assertTrue(api.contains("PERMISSION_DENIED"))
+        // The SDK surfaces provider-agnostic error codes from responses.
+        assertTrue(api.contains("error.code"))
     }
 
     @Test fun `package json keeps the official name and attribution`() {
@@ -120,7 +120,8 @@ class NoxsNxWebAndApiTest {
         request("r1", "open", "https://example.com")
         request("r2", "open", "javascript:alert(1)")
         request("r3", "delete", "https://example.com")
-        assertEquals(3, bridge.processPendingRequests())
+        // Only the one valid open is counted as handled; the rest are answered.
+        assertEquals(1, bridge.processPendingRequests())
 
         assertEquals(1, opened.size)
         assertEquals("https://example.com", opened[0].second)

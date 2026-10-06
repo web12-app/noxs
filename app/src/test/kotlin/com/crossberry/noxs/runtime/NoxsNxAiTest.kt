@@ -4,6 +4,7 @@ import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -18,11 +19,15 @@ class NoxsNxAiTest {
     @get:Rule
     val temporary = TemporaryFolder()
 
-    private fun install(): NoxsPaths {
-        val paths = NoxsPaths(temporary.newFolder("rootfs"))
+    private lateinit var paths: NoxsPaths
+
+    @Before
+    fun setUp() {
+        paths = NoxsPaths(temporary.newFolder("rootfs"))
         RootfsConfigurator.ensureNxPackageSystem(paths)
-        return paths
     }
+
+    private fun install(): NoxsPaths = paths
 
     private fun installed(paths: NoxsPaths, rel: String): String =
         File(paths.rootfs, rel).readText(Charsets.UTF_8)
@@ -47,9 +52,9 @@ class NoxsNxAiTest {
     }
 
     @Test fun `default model route is kilo-auto-free with kilo provider`() {
-        val paths = install()
+        install()
         val agent = installed(paths, "usr/local/lib/noxs/ai/agent.py")
-        assertTrue(agent.contains("\"model\": \"kilo-auto/free\""))
+        assertTrue(agent.contains("'model': 'kilo-auto/free'"))
         assertTrue(agent.contains("'provider': 'kilo'"))
         // The runtime never depends on provider-specific code paths: the
         // provider is configuration (base_url + model + key env), §26.
@@ -106,8 +111,8 @@ class NoxsNxAiTest {
 
     @Test fun `web and ai modules coexist after migration bump`() {
         val paths = install()
-        // Marker moved with the AI install (migration 2 -> 3).
-        assertEquals("3", installed(paths, "usr/local/share/noxs-pkg/.nx-version").trim())
+        // Marker moved with the AI install (migration 3 -> 4).
+        assertEquals("4", installed(paths, "usr/local/share/noxs-pkg/.nx-version").trim())
         assertTrue(File(paths.rootfs, "usr/local/lib/noxs/nx-api/nx-api.js").isFile)
         assertTrue(File(paths.rootfs, "usr/local/lib/noxs/ai/agent.py").isFile)
     }
