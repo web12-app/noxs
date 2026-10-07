@@ -111,8 +111,12 @@ class NoxsNxAiTest {
 
     @Test fun `web and ai modules coexist after migration bump`() {
         val paths = install()
-        // Marker moved with the AI install (migration 3 -> 4).
-        assertEquals("4", installed(paths, "usr/local/share/noxs-pkg/.nx-version").trim())
+        // The marker must always carry the CURRENT package-system version
+        // (last bumps: 3->4 AI install, 4->5 env-lib, 5->6 vpn-lib).
+        assertEquals(
+            RootfsConfigurator.NX_PACKAGE_SYSTEM_VERSION,
+            installed(paths, "usr/local/share/noxs-pkg/.nx-version").trim()
+        )
         assertTrue(File(paths.rootfs, "usr/local/lib/noxs/nx-api/nx-api.js").isFile)
         assertTrue(File(paths.rootfs, "usr/local/lib/noxs/ai/agent.py").isFile)
     }

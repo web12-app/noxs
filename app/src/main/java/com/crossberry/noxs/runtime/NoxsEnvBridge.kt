@@ -163,7 +163,7 @@ class NoxsEnvBridge(private val paths: NoxsPaths) {
                 task?.state?.name?.lowercase().orEmpty(),
                 (task?.progress ?: -1).toString(),
                 task?.currentOperation.orEmpty()
-            ).joinToString("\t") { field -> field.replace(Regex("[\t\r\n]"), " ") }
+            ).joinToString("\t") { field -> sanitizeField(field) }
         } + "\n"
         atomicWrite(paths.envSnapshot, registry)
 
@@ -176,10 +176,14 @@ class NoxsEnvBridge(private val paths: NoxsPaths) {
                 variants.joinToString(",") { it.id },
                 variants.firstOrNull { it.isDefault }?.id
                     ?: variants.firstOrNull()?.id.orEmpty()
-            ).joinToString("\t") { field -> field.replace(Regex("[\t\r\n]"), " ") }
+            ).joinToString("\t") { field -> sanitizeField(field) }
         } + "\n"
         atomicWrite(paths.envProvidersSnapshot, providerLines)
     }
+
+    /** CRLF counts as ONE break; any other tab/CR/LF becomes a single space. */
+    private fun sanitizeField(field: String): String =
+        field.replace("\r\n", " ").replace(Regex("[\t\r\n]"), " ")
 
     private fun atomicWrite(target: File, content: String) {
         runCatching {

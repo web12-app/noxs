@@ -261,7 +261,8 @@ object RootfsConfigurator {
 
     // 5: adds env-lib.sh (nx env Multi-Env Manager CLI) to existing environments
     // 6: adds vpn-lib.sh (nx vpn Tor over PRoot) to existing environments
-    private val NX_PACKAGE_SYSTEM_VERSION = "6"
+    // internal: asserted from unit tests (NoxsNxAiTest migration marker check)
+    internal val NX_PACKAGE_SYSTEM_VERSION = "6"
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

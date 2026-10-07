@@ -9,6 +9,9 @@ val noxsVersionCode = providers.gradleProperty("noxsVersionCode").orElse("4000")
 android {
     namespace = "com.crossberry.noxs"
     compileSdk = 34
+    // Pinned: AGP's default (26.1) triggers SDK auto-install on machines that
+    // only have 26.3 provisioned (CI installs 26.3 explicitly).
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         applicationId = "com.crossberry.noxs"
