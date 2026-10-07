@@ -72,7 +72,8 @@ AI:
 All noxs commands are also allowed here (nx <command> == noxs <command>):
   nx docker install | nx code start | nx storage status | nx help
 
-Run 'nx pkg' or 'nx install' without arguments for command-specific help.
+Run 'nx pkg', 'nx install' or 'nx ow' without arguments for
+command-specific help.
 EOF
 }
 
@@ -140,18 +141,21 @@ case "§{1:-}" in
         esac
         ;;
     ow)
+        shift                       # drop "ow", forward only the URL
         # Noxs native browser window (real WebView on the Android side).
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/web-lib.sh"
         nx_ow_cmd "§@"
         ;;
     ai)
+        shift                       # drop "ai", forward only the task/options
         # Noxs AI Agent Terminal (Python runtime on the guest side).
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/ai-lib.sh"
         nx_ai_cmd "§@"
         ;;
     install)
+        shift                       # drop "install" — it is NOT a package name
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/pkg-lib.sh"
         # shellcheck source=/dev/null
@@ -159,6 +163,7 @@ case "§{1:-}" in
         pkg_install_cmd "§@"
         ;;
     list)
+        shift                       # drop "list"
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/pkg-lib.sh"
         # shellcheck source=/dev/null
@@ -166,6 +171,7 @@ case "§{1:-}" in
         pkg_list_cmd "§@"
         ;;
     info)
+        shift                       # drop "info" — the package name follows
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/pkg-lib.sh"
         # shellcheck source=/dev/null
@@ -173,6 +179,7 @@ case "§{1:-}" in
         pkg_info_cmd "§@"
         ;;
     update)
+        shift                       # drop "update" — never treat it as a package
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/pkg-lib.sh"
         # shellcheck source=/dev/null
@@ -180,6 +187,7 @@ case "§{1:-}" in
         pkg_update_cmd "§@"
         ;;
     remove|uninstall)
+        shift                       # drop "remove" — the package name follows
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/pkg-lib.sh"
         # shellcheck source=/dev/null

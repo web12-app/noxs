@@ -310,6 +310,48 @@ echo "=== dispatcher: forwarding + help ==="
 "$NXBIN" version | grep -q "nx 1" && pass "nx version" || fail "nx version"
 if "$NXBIN" pkg frobnicate >/dev/null 2>&1; then fail "unknown pkg subcommand rejected"; else pass "unknown pkg subcommand rejected"; fi
 
+# ---- dispatcher: subcommand must be dropped before forwarding ---------------
+# Regression (device report): the dispatcher used to forward the subcommand
+# itself, so `nx ow URL` saw two arguments ("exactly one URL" error) and a
+# bare `nx install` resolved a package literally named "install".
+echo "=== dispatcher: argument forwarding ==="
+OWOUT="$("$NXBIN" ow https://example.com 2>&1)"
+case "$OWOUT" in
+    *"exactly one URL"*) fail "nx ow forwards a single URL (subcommand leaked)" ;;
+    *"web bridge is unavailable"*) pass "nx ow forwards a single URL" ;;
+    *) fail "nx ow unexpected output: $OWOUT" ;;
+esac
+INOUT="$("$NXBIN" install 2>&1)"
+if printf '%s' "$INOUT" | grep -q "usage: nx install"; then
+    pass "bare nx install shows usage"
+else
+    fail "bare nx install shows usage (got: $INOUT)"
+fi
+INFOUT="$("$NXBIN" info 2>&1)"
+if printf '%s' "$INFOUT" | grep -q "usage: nx info"; then
+    pass "bare nx info shows usage"
+else
+    fail "bare nx info shows usage (got: $INFOUT)"
+fi
+UPDOUT="$(NX_STATE_DIR="$TMP/state" "$NXBIN" update 2>&1)"
+if [ "$UPDOUT" = "nx: No packages installed." ]; then
+    pass "nx update with nothing installed"
+else
+    fail "nx update with nothing installed (got: $UPDOUT)"
+fi
+RMOUT="$(NX_STATE_DIR="$TMP/state" "$NXBIN" remove tree 2>&1)"
+if printf '%s' "$RMOUT" | grep -q "Package not installed: tree"; then
+    pass "nx remove targets the named package"
+else
+    fail "nx remove targets the named package (got: $RMOUT)"
+fi
+LSOUT="$(NX_STATE_DIR="$TMP/state" "$NXBIN" list 2>&1)"
+if [ "$LSOUT" = "nx: No packages installed." ]; then
+    pass "nx list with nothing installed"
+else
+    fail "nx list with nothing installed (got: $LSOUT)"
+fi
+
 # ---- ai dispatcher wiring ----------------------------------------------------
 echo "=== ai: dispatcher wiring ==="
 if [ -f "$NX_LIB_DIR/ai-lib.sh" ]; then pass "ai-lib.sh extracted"; else fail "ai-lib.sh extracted"; fi

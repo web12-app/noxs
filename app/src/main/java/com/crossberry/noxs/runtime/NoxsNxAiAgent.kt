@@ -34,6 +34,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 try:
     from provider import AIProviderError, CancelFlag, ChatClient, RetryPolicy
@@ -315,6 +316,14 @@ class AgentRuntime:
         self._close_stream_line()
         print('_> %s' % text, flush=True)
 
+    def _provider_host(self):
+        '''Human-readable host of the configured AI gateway, for failure hints.'''
+        try:
+            host = urlparse(self.config.get('base_url') or '').netloc
+        except (ValueError, AttributeError):
+            host = ''
+        return host or 'the AI gateway'
+
     # --------------------------------------------------------- permissions
 
     def confirm(self, tool, target_summary):
@@ -513,6 +522,10 @@ class AgentRuntime:
                 self.emit_note('The AI provider rejected the credentials. Check the Noxs AI configuration key.')
             else:
                 self.emit_note('The AI provider is temporarily unavailable. (%s)' % error.code)
+                self.emit_note('The gateway %s could not be reached or is failing right now. '
+                               'Check your connection and retry — or configure another '
+                               'OpenAI-compatible gateway with NOXS_AI_BASE_URL and NOXS_AI_MODEL.'
+                               % self._provider_host())
             return False
         finally:
             self.session.cancel_flag.reset()
