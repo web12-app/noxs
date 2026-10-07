@@ -24,3 +24,7 @@ linux-runtime/bootstrap/**/*.sha256.staged
 
 # Runtime logs
 *.log
+
+# Python bytecode
+__pycache__/
+*.pyc

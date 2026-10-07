@@ -12,6 +12,7 @@ import os
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'linux-runtime' / 'nx' / 'ai'))
@@ -354,6 +355,253 @@ class AgentLoopTests(unittest.TestCase):
         runtime.session.owned_pids.add(4194304)  # impossible pid
         runtime.shutdown()  # must not raise
         self.assertNotIn(pid, runtime.session.owned_pids or {pid})
+
+
+class ProviderStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = self.enterContext(_tmpdir())
+        self.store_path = os.path.join(self.tmp, 'providers.json')
+
+    def test_round_trip(self):
+        store = agent_mod.load_provider_store(self.store_path)  # missing -> empty
+        self.assertIsNone(store['active'])
+        self.assertTrue(store['full_session'])
+        self.assertEqual(store['providers'], {})
+        store['active'] = 'openrouter'
+        store['full_session'] = False
+        store['providers']['mine'] = {'base_url': 'https://x/v1', 'model': 'm',
+                                      'api_key_env': 'K'}
+        agent_mod.save_provider_store(store, self.store_path)
+        loaded = agent_mod.load_provider_store(self.store_path)
+        self.assertEqual(loaded['active'], 'openrouter')
+        self.assertFalse(loaded['full_session'])
+        self.assertEqual(loaded['providers']['mine']['model'], 'm')
+
+    def test_broken_store_falls_back_to_empty(self):
+        with open(self.store_path, 'w') as handle:
+            handle.write('not json{')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertEqual(store['providers'], {})
+        self.assertIsNone(store['active'])
+
+    def test_resolve_preset_and_custom(self):
+        definition = agent_mod.resolve_provider_definition('openrouter', {})
+        self.assertEqual(definition['base_url'], 'https://openrouter.ai/api/v1')
+        self.assertTrue(definition['key_required'])
+        self.assertEqual(definition['source'], 'preset')
+        store = {'providers': {'mine': {'base_url': 'https://gw/v1', 'model': 'm1'}}}
+        definition = agent_mod.resolve_provider_definition('mine', store)
+        self.assertEqual(definition['source'], 'custom')
+        self.assertEqual(definition['label'], 'mine')
+        self.assertTrue(definition['key_required'])
+        self.assertIsNone(agent_mod.resolve_provider_definition('nope', store))
+
+    def test_preset_catalog(self):
+        for name in ('kilo', 'opencode-zen', 'openrouter'):
+            self.assertIn(name, agent_mod.PROVIDER_PRESETS)
+        self.assertIs(agent_mod.PROVIDER_PRESETS['kilo']['key_required'], False)
+        self.assertEqual(agent_mod.PROVIDER_PRESETS['opencode-zen']['base_url'],
+                         'https://opencode.ai/zen/v1')
+        self.assertEqual(agent_mod.PROVIDER_PRESETS['openrouter']['api_key_env'],
+                         'OPENROUTER_API_KEY')
+
+    def test_provider_display_label(self):
+        self.assertEqual(agent_mod.provider_display_label('kilo'), 'Kilo')
+        self.assertEqual(agent_mod.provider_display_label('opencode-zen'),
+                         'OpenCode Zen')
+        self.assertEqual(agent_mod.provider_display_label(
+            'mine', {'label': 'mine', 'source': 'custom'}), 'mine')
+
+    def test_slugify(self):
+        self.assertEqual(agent_mod.slugify_provider_name('My Gateway!'), 'my-gateway')
+        self.assertEqual(agent_mod.slugify_provider_name('   '), '')
+
+
+class ProviderConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = self.enterContext(_tmpdir())
+
+    def test_store_selects_openrouter(self):
+        store = {'active': 'openrouter', 'full_session': True, 'providers': {}}
+        config = agent_mod.load_config(path='/nonexistent/no/config.json', store=store)
+        self.assertEqual(config['provider'], 'openrouter')
+        self.assertEqual(config['base_url'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(config['model'], 'openrouter/auto')
+        self.assertEqual(config['api_key_env'], 'OPENROUTER_API_KEY')
+        self.assertTrue(config['full_session'])
+
+    def test_custom_provider_applies(self):
+        store = {'active': 'mine', 'full_session': False,
+                 'providers': {'mine': {'base_url': 'https://gw.example/v1',
+                                        'model': 'm-1', 'api_key_env': 'MY_KEY'}}}
+        config = agent_mod.load_config(path='/nonexistent', store=store)
+        self.assertEqual(config['base_url'], 'https://gw.example/v1')
+        self.assertEqual(config['model'], 'm-1')
+        self.assertEqual(config['api_key_env'], 'MY_KEY')
+        self.assertFalse(config['full_session'])
+
+    def test_env_base_url_beats_store(self):
+        old = os.environ.get('NOXS_AI_BASE_URL')
+        os.environ['NOXS_AI_BASE_URL'] = 'https://override.example/v1'
+        try:
+            store = {'active': 'openrouter', 'full_session': True, 'providers': {}}
+            config = agent_mod.load_config(path='/nonexistent', store=store)
+            self.assertEqual(config['base_url'], 'https://override.example/v1')
+            self.assertEqual(config['model'], 'openrouter/auto')
+        finally:
+            if old is None:
+                os.environ.pop('NOXS_AI_BASE_URL', None)
+            else:
+                os.environ['NOXS_AI_BASE_URL'] = old
+
+    def test_full_session_forgets_between_turns(self):
+        runtime = make_runtime([assistant('one'), assistant('two')], self.tmp)
+        runtime.config['full_session'] = False
+        self.assertTrue(runtime.agent_turn('first'))
+        self.assertIn('first', json.dumps(runtime.client.calls[0]['messages']))
+        self.assertTrue(runtime.agent_turn('second'))
+        self.assertNotIn('first', json.dumps(runtime.client.calls[1]['messages']))
+
+    def test_full_session_keeps_history_by_default(self):
+        runtime = make_runtime([assistant('one'), assistant('two')], self.tmp)
+        self.assertTrue(runtime.agent_turn('first'))
+        self.assertTrue(runtime.agent_turn('second'))
+        self.assertTrue(any(m.get('role') == 'user' and m.get('content') == 'first'
+                            for m in runtime.client.calls[1]['messages']))
+
+
+class OutputUITests(unittest.TestCase):
+    def test_diff_lines_counts_and_rows(self):
+        added, removed, rows = agent_mod.diff_lines('a\nb\nc', 'a\nX\nc\nd')
+        self.assertEqual((added, removed), (2, 1))
+        signs = [sign for sign, _ in rows]
+        self.assertIn('-', signs)
+        self.assertIn('+', signs)
+
+    def test_diff_lines_new_file_capped_rows(self):
+        added, removed, rows = agent_mod.diff_lines(None, '\n'.join('l%d' % i for i in range(9)))
+        self.assertEqual(added, 9)
+        self.assertEqual(removed, 0)
+        self.assertEqual(len(rows), agent_mod.DIFF_ROW_LIMIT)
+
+    def test_diff_lines_no_change(self):
+        self.assertEqual(agent_mod.diff_lines('same', 'same'), (0, 0, []))
+
+    def test_badge_and_colors_respect_mode(self):
+        saved = agent_mod.COLOR_ENABLED
+        try:
+            agent_mod.COLOR_ENABLED = False
+            self.assertEqual(agent_mod.tool_badge(agent_mod.PERMISSION_READ), '[read]')
+            self.assertEqual(agent_mod.tool_badge(agent_mod.PERMISSION_CONFIRM), '[edit]')
+            self.assertEqual(agent_mod.colorize('x', '31'), 'x')
+            agent_mod.COLOR_ENABLED = True
+            self.assertIn('\x1b[32m', agent_mod.colorize('{✓}', agent_mod.COLOR_GREEN))
+            self.assertIn('[read]', agent_mod.tool_badge(agent_mod.PERMISSION_READ))
+        finally:
+            agent_mod.COLOR_ENABLED = saved
+
+    def test_spinner_stop_cleans_thread(self):
+        spinner = agent_mod.Spinner(enabled=True)
+        spinner.start('demo')
+        spinner.stop()
+        self.assertIsNone(spinner._thread)
+
+    def test_disabled_spinner_is_noop(self):
+        spinner = agent_mod.Spinner(enabled=False)
+        spinner.start('demo')
+        spinner.stop()
+        self.assertIsNone(spinner._thread)
+
+
+class ProviderCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = self.enterContext(_tmpdir())
+        self.store_path = os.path.join(self.tmp, 'providers.json')
+        self._orig_store_path = agent_mod.provider_store_path
+        agent_mod.provider_store_path = lambda: self.store_path
+
+    def tearDown(self):
+        agent_mod.provider_store_path = self._orig_store_path
+
+    def test_provider_add_yes_enables_full_session_and_hot_applies(self):
+        runtime = make_runtime([assistant('ok')], self.tmp, one_shot=False)
+        answers = iter(['my-gw', 'https://gw.example/v1', 'my-model', 'MY_KEY', 'y', 'y'])
+        with mock.patch('builtins.input', lambda *a, **k: next(answers)):
+            runtime.slash_command('/provider add')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertEqual(store['active'], 'my-gw')
+        self.assertTrue(store['full_session'])
+        entry = store['providers']['my-gw']
+        self.assertEqual(entry['base_url'], 'https://gw.example/v1')
+        self.assertEqual(entry['model'], 'my-model')
+        self.assertEqual(entry['api_key_env'], 'MY_KEY')
+        self.assertEqual(runtime.config['provider'], 'my-gw')
+        self.assertEqual(runtime.config['base_url'], 'https://gw.example/v1')
+        self.assertEqual(runtime.client.base_url, 'https://gw.example/v1')
+        self.assertTrue(runtime.config['full_session'])
+
+    def test_provider_add_no_saves_nothing(self):
+        runtime = make_runtime([assistant('ok')], self.tmp, one_shot=False)
+        answers = iter(['x', 'https://x.example/v1', 'm', 'NOXS_AI_API_KEY', 'n'])
+        with mock.patch('builtins.input', lambda *a, **k: next(answers)):
+            runtime.slash_command('/provider add')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertEqual(store['providers'], {})
+        self.assertIsNone(store['active'])
+
+    def test_provider_add_preset_prefills(self):
+        runtime = make_runtime([assistant('ok')], self.tmp, one_shot=False)
+        answers = iter(['', '', '', 'y', 'n'])
+        with mock.patch('builtins.input', lambda *a, **k: next(answers)):
+            runtime.slash_command('/provider add openrouter')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertEqual(store['active'], 'openrouter')
+        entry = store['providers']['openrouter']
+        self.assertEqual(entry['base_url'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(entry['preset'], 'openrouter')
+        self.assertFalse(store['full_session'])
+
+    def test_provider_use_switches_client_immediately(self):
+        runtime = make_runtime([assistant('ok')], self.tmp, one_shot=False)
+        runtime.slash_command('/provider use openrouter')
+        self.assertEqual(runtime.client.base_url, 'https://openrouter.ai/api/v1')
+        self.assertEqual(runtime.client.model, 'openrouter/auto')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertEqual(store['active'], 'openrouter')
+
+    def test_provider_use_unknown_is_refused(self):
+        runtime = make_runtime([assistant('ok')], self.tmp, one_shot=False)
+        runtime.slash_command('/provider use ghost')  # prints a hint, no crash
+        self.assertEqual(runtime.config['provider'], 'kilo')
+
+    def test_provider_remove_rules(self):
+        runtime = make_runtime([assistant('ok')], self.tmp, one_shot=False)
+        store = agent_mod.load_provider_store(self.store_path)
+        store['providers']['mine'] = {'base_url': 'https://m/v1', 'model': 'm1'}
+        store['active'] = 'mine'
+        agent_mod.save_provider_store(store, self.store_path)
+        # removing the active provider is refused
+        runtime.slash_command('/provider remove mine')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertIn('mine', store['providers'])
+        # built-in presets cannot be removed
+        runtime.slash_command('/provider remove kilo')
+        # answering yes removes a non-active custom provider
+        store['active'] = 'kilo'
+        agent_mod.save_provider_store(store, self.store_path)
+        with mock.patch('builtins.input', lambda *a, **k: 'y'):
+            runtime.slash_command('/provider remove mine')
+        store = agent_mod.load_provider_store(self.store_path)
+        self.assertNotIn('mine', store['providers'])
+
+    def test_apply_config_rebuilds_client(self):
+        runtime = make_runtime([assistant('ok')], self.tmp)
+        config = dict(runtime.config)
+        config['base_url'] = 'https://other.example/v1'
+        config['model'] = 'other-model'
+        runtime.apply_config(config)
+        self.assertEqual(runtime.client.base_url, 'https://other.example/v1')
+        self.assertEqual(runtime.client.model, 'other-model')
 
 
 class ToolRegistryTests(unittest.TestCase):

@@ -13,8 +13,12 @@ Boundaries enforced here (never in the model):
   - tool output is truncated, secrets are redacted, context is compacted (section 15)
   - Ctrl+C cancels the current request/tool and returns to nx@ai>
   - Ctrl+D / exit ends the session and releases everything it owns (section 20)
+  - /provider manages AI gateways (Kilo, OpenCode Zen, OpenRouter, custom
+    OpenAI-compatible endpoints): add with a y/N confirmation, switch, remove;
+    answering yes enables full session chat (the whole conversation is kept)
 '''
 import argparse
+import difflib
 import json
 import os
 import re
@@ -67,10 +71,115 @@ CONFIG_ENV_OVERRIDES = {
     'stream': 'NOXS_AI_STREAM',
 }
 
-BANNER_PROVIDER_LABEL = 'Kilo'
+PROVIDER_PRESETS = {
+    'kilo': {
+        'label': 'Kilo',
+        'base_url': 'https://api.kilo.ai/api/gateway',
+        'model': 'kilo-auto/free',
+        'api_key_env': 'KILO_API_KEY',
+        'key_required': False,
+    },
+    'opencode-zen': {
+        'label': 'OpenCode Zen',
+        'base_url': 'https://opencode.ai/zen/v1',
+        'model': 'big-pickle',
+        'api_key_env': 'OPENCODE_API_KEY',
+        'key_required': True,
+    },
+    'openrouter': {
+        'label': 'OpenRouter',
+        'base_url': 'https://openrouter.ai/api/v1',
+        'model': 'openrouter/auto',
+        'api_key_env': 'OPENROUTER_API_KEY',
+        'key_required': True,
+    },
+}
+
+ENV_NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
-def load_config(path=None, overrides=None):
+def provider_store_path():
+    '''Custom providers, the active choice and chat mode live here.
+    Only the environment-variable NAME is stored — never the key itself.'''
+    return os.path.join(os.path.expanduser('~'), '.noxs', 'ai', 'providers.json')
+
+
+def load_provider_store(path=None):
+    '''Missing or broken store files fall back to the empty store (built-ins only).'''
+    store = {'active': None, 'full_session': True, 'providers': {}}
+    try:
+        with open(path or provider_store_path()) as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return store
+    if not isinstance(data, dict):
+        return store
+    providers = data.get('providers')
+    if isinstance(providers, dict):
+        store['providers'] = {str(name): entry for name, entry in providers.items()
+                              if isinstance(entry, dict)}
+    if isinstance(data.get('active'), str) and data['active']:
+        store['active'] = data['active']
+    if isinstance(data.get('full_session'), bool):
+        store['full_session'] = data['full_session']
+    return store
+
+
+def save_provider_store(store, path=None):
+    target = path or provider_store_path()
+    directory = os.path.dirname(target)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    payload = {
+        'active': store.get('active'),
+        'full_session': bool(store.get('full_session', True)),
+        'providers': store.get('providers') or {},
+    }
+    with open(target, 'w') as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write('\n')
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+
+
+def resolve_provider_definition(name, store=None):
+    '''Preset or custom definition for a provider name, or None when unknown.
+    A custom entry sharing a preset name overrides preset fields one by one.'''
+    store = store or {}
+    base = PROVIDER_PRESETS.get(name)
+    entry = (store.get('providers') or {}).get(name)
+    if base is None and entry is None:
+        return None
+    definition = dict(base) if base else {}
+    if entry:
+        definition['label'] = entry.get('label') or definition.get('label') or name
+        definition['key_required'] = bool(entry.get(
+            'key_required', definition.get('key_required', True)))
+        definition['source'] = 'preset' if base else 'custom'
+        for key in ('base_url', 'model', 'api_key_env'):
+            value = entry.get(key)
+            if value:
+                definition[key] = value
+    else:
+        definition['source'] = 'preset'
+    return definition
+
+
+def provider_display_label(name, definition=None):
+    if definition and definition.get('label'):
+        return definition['label']
+    preset = PROVIDER_PRESETS.get(name)
+    return preset['label'] if preset else (name or 'kilo')
+
+
+def slugify_provider_name(raw):
+    slug = re.sub(r'[^a-z0-9._-]+', '-', (raw or '').strip().lower()).strip('-.')
+    return slug[:24]
+
+
+def load_config(path=None, overrides=None, store=None):
     config = dict(CONFIG_DEFAULTS)
     candidates = [
         path,
@@ -89,10 +198,12 @@ def load_config(path=None, overrides=None):
             break
         except (OSError, ValueError):
             continue
+    env_set = set()
     for key, env_name in CONFIG_ENV_OVERRIDES.items():
         value = os.environ.get(env_name)
         if value is None or value == '':
             continue
+        env_set.add(key)
         if isinstance(CONFIG_DEFAULTS[key], bool):
             config[key] = value.lower() in ('1', 'true', 'yes', 'on')
         elif isinstance(CONFIG_DEFAULTS[key], int):
@@ -102,6 +213,20 @@ def load_config(path=None, overrides=None):
                 pass
         else:
             config[key] = value
+    if store is None:
+        store = load_provider_store()
+    active = store.get('active') or config['provider'] or 'kilo'
+    definition = None
+    if active != 'kilo':
+        definition = resolve_provider_definition(active, store)
+    elif (store.get('providers') or {}).get('kilo'):
+        definition = resolve_provider_definition('kilo', store)
+    if definition:
+        config['provider'] = active
+        for key in ('base_url', 'model', 'api_key_env'):
+            if key not in env_set and definition.get(key):
+                config[key] = definition[key]
+    config['full_session'] = bool(store.get('full_session', True))
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -180,6 +305,10 @@ class ContextManager:
                 })
         self.messages = head + body
 
+    def forget(self):
+        '''Full session chat off: nothing is carried into the next turn.'''
+        self.messages = []
+
     def snapshot(self):
         return [self.system] + self.messages
 
@@ -222,18 +351,127 @@ def safe_log(log_path, session_id, event, **fields):
 
 # ------------------------------------------------------------------ runtime
 
+# ANSI colors render on a TTY; NOXS_AI_COLOR=0/1 forces the mode either way.
+_color_mode = os.environ.get('NOXS_AI_COLOR', '').strip().lower()
+if _color_mode in ('1', 'true', 'yes', 'on'):
+    COLOR_ENABLED = True
+elif _color_mode in ('0', 'false', 'no', 'off'):
+    COLOR_ENABLED = False
+else:
+    COLOR_ENABLED = bool(getattr(sys.stdout, 'isatty', lambda: False)())
+
+COLOR_GREEN = '32'
+COLOR_RED = '31'
+COLOR_YELLOW = '33'
+COLOR_CYAN = '36'
+COLOR_DIM = '2'
+
 RUNNING = '{-_-}'
 OK = '{✓}'
 FAILED = '{×}'
 WAITING = '{…}'
 CANCELLED = '{■}'
 
+SYMBOL_COLORS = {
+    OK: COLOR_GREEN,
+    FAILED: COLOR_RED,
+    CANCELLED: COLOR_YELLOW,
+    WAITING: COLOR_YELLOW,
+    RUNNING: COLOR_CYAN,
+}
+
+SPINNER_FRAMES = ('{-_-}', '{o_o}', '{0_o}', '{o_0}', '{-_-}', '{o.o}', '{-.-}')
+
 EXIT_WORDS = ('exit', 'quit')
 
 
-def tool_line(symbol, name, detail=''):
+def colorize(text, code=''):
+    if not code or not COLOR_ENABLED:
+        return text
+    return '\x1b[%sm%s\x1b[0m' % (code, text)
+
+
+def tool_badge(permission):
+    '''READ tools wear a cyan [read] badge; anything that mutates state is
+    a yellow [edit] badge — the same green/red language as a git diff.'''
+    if permission == PERMISSION_READ:
+        return colorize('[read]', COLOR_CYAN)
+    return colorize('[edit]', COLOR_YELLOW)
+
+
+def tool_line(symbol, name, detail='', badge=''):
     suffix = ' ' + detail if detail else ''
-    print('   %s %s%s' % (symbol, name, suffix), flush=True)
+    prefix = badge + ' ' if badge else ''
+    print('   %s %s%s%s' % (colorize(symbol, SYMBOL_COLORS.get(symbol, '')),
+                            prefix, name, suffix), flush=True)
+
+
+class Spinner:
+    '''Single-line progress animation for one foreground action (a tool run
+    or a model turn). Animates only on a TTY; every stop leaves a clean line
+    so the result line replaces the animation in place.'''
+
+    INTERVAL = 0.12
+
+    def __init__(self, enabled=None):
+        self._stop = threading.Event()
+        self._thread = None
+        self._label = ''
+        self.enabled = COLOR_ENABLED if enabled is None else bool(enabled)
+
+    def _animate(self):
+        index = 0
+        while not self._stop.wait(self.INTERVAL):
+            frame = colorize(SPINNER_FRAMES[index % len(SPINNER_FRAMES)], COLOR_CYAN)
+            sys.stdout.write('\r\x1b[2K   %s %s' % (frame, self._label))
+            sys.stdout.flush()
+            index += 1
+
+    def start(self, label):
+        self._label = label
+        if not self.enabled:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._animate, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+        if self.enabled:
+            sys.stdout.write('\r\x1b[2K')
+            sys.stdout.flush()
+
+
+DIFF_MAX_BYTES = 262144
+DIFF_ROW_LIMIT = 8
+
+
+def diff_lines(old_text, new_text, limit=DIFF_ROW_LIMIT):
+    '''Git-style accounting for a file overwrite: returns (added, removed, rows)
+    where rows are (sign, line) pairs, '+' = added (green) and '-' = removed
+    (red). old_text None means the file did not exist before.'''
+    new_lines = (new_text or '').splitlines()
+    if old_text is None:
+        return len(new_lines), 0, [('+', line) for line in new_lines[:limit]]
+    old_lines = old_text.splitlines()
+    added = removed = 0
+    rows = []
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ('delete', 'replace'):
+            for line in old_lines[i1:i2]:
+                removed += 1
+                if len(rows) < limit:
+                    rows.append(('-', line))
+        if tag in ('insert', 'replace'):
+            for line in new_lines[j1:j2]:
+                added += 1
+                if len(rows) < limit:
+                    rows.append(('+', line))
+    return added, removed, rows
 
 
 def assistant_prefix():
@@ -314,6 +552,24 @@ class AgentRuntime:
             host = ''
         return host or 'the AI gateway'
 
+    def apply_config(self, config):
+        '''Hot-apply a provider configuration (the conversation is kept).'''
+        self.config = config
+        self.client = ChatClient(
+            base_url=config['base_url'],
+            model=config['model'],
+            api_key=resolve_api_key(config),
+            timeout=config['request_timeout_sec'],
+            retry_policy=RetryPolicy(max_retries=config['max_retries']),
+            cancel_flag=self.session.cancel_flag,
+        )
+        self.context.system = {'role': 'system', 'content': self._system_prompt()}
+
+    def provider_label(self):
+        name = self.config.get('provider', 'kilo')
+        return provider_display_label(
+            name, resolve_provider_definition(name, load_provider_store()))
+
     # --------------------------------------------------------- permissions
 
     def confirm(self, tool, target_summary):
@@ -367,7 +623,7 @@ class AgentRuntime:
                 return tool, ToolResult.failure(name, 'argument %s must be a boolean' % key)
         return tool, None
 
-    def _execute_one(self, call_id, call):
+    def _execute_one(self, call_id, call, animated=True):
         self.session.cancel_flag.check()
         tool, invalid = self._validate_call(call)
         if invalid is not None:
@@ -383,8 +639,17 @@ class AgentRuntime:
             tool_line(CANCELLED, name, 'denied by user')
             result = ToolResult.failure(name, 'the user denied this action')
         else:
-            tool_line(RUNNING, name, target if tool.permission == PERMISSION_READ else '')
+            badge = tool_badge(tool.permission)
+            target_text = target if tool.permission == PERMISSION_READ else ''
+            tool_line(RUNNING, name, target_text, badge=badge)
+            spinner = Spinner() if animated else None
+            if spinner is not None:
+                spinner.start('%s %s%s' % (badge, name,
+                                           (' ' + target_text) if target_text else ''))
             started = time.monotonic()
+            old_text = None
+            if name == 'file.write':
+                old_text = self._capture_previous_file(arguments.get('path'))
             try:
                 result = tool.executor(arguments)
             except AIProviderError:
@@ -398,9 +663,14 @@ class AgentRuntime:
                 result = ToolResult.failure(name, str(error) or 'invalid path or input')
             except Exception as error:
                 result = ToolResult.failure(name, 'tool failed: %s' % error.__class__.__name__)
+            finally:
+                if spinner is not None:
+                    spinner.stop()
             symbol = OK if result.get('success') else FAILED
             detail = 'exit code: %s' % result.get('exit_code') if not result.get('success') else target
-            tool_line(symbol, name, detail if not result.get('success') else '')
+            tool_line(symbol, name, detail if not result.get('success') else '', badge=badge)
+            if name == 'file.write' and result.get('success'):
+                self._print_write_diff(old_text, arguments.get('content'))
             if name == 'terminal.run' and result.get('success'):
                 self.session.recent_terminal.append((result.get('stdout') or '')[-2000:])
                 self.session.recent_terminal = self.session.recent_terminal[-5:]
@@ -411,6 +681,44 @@ class AgentRuntime:
         self.session.tool_history.append({'tool': name, 'ok': bool(result.get('success'))})
         self.session.tool_calls += 1
         return result
+
+    def _capture_previous_file(self, path):
+        '''Best-effort snapshot of a file before file.write overwrites it,
+        taken through the read tool so scope guards apply. None = no diff.'''
+        if not isinstance(path, str) or not path:
+            return None
+        reader = self.registry.get('file.read')
+        if reader is None:
+            return None
+        try:
+            snapshot = reader.executor({'path': path})
+        except Exception:
+            return None
+        if not snapshot.get('success'):
+            return None
+        data = snapshot.get('stdout') or ''
+        if not data or len(data) > DIFF_MAX_BYTES or '[output truncated' in data:
+            return None
+        return data
+
+    def _print_write_diff(self, old_text, new_text):
+        '''Git-style colored diff preview after a successful file.write:
+        added lines render green, removed lines red.'''
+        if not isinstance(new_text, str):
+            return
+        if len(new_text) > DIFF_MAX_BYTES:
+            self.emit_note('(diff skipped: the written file is very large)')
+            return
+        added, removed, rows = diff_lines(old_text, new_text)
+        if not added and not removed:
+            return
+        for sign, text in rows:
+            color = COLOR_GREEN if sign == '+' else COLOR_RED
+            print('        %s' % colorize('%s %s' % (sign, text), color), flush=True)
+        summary = '+%d -%d' % (added, removed)
+        if old_text is None:
+            summary += ' (new file)'
+        print('        %s' % colorize(summary, COLOR_DIM), flush=True)
 
     def execute_calls(self, calls):
         '''Parallel only when every call in the batch is independent READ-level
@@ -430,7 +738,7 @@ class AgentRuntime:
         if parallel:
             self.emit_note('Running %d independent checks in parallel...' % len(batch))
             with ThreadPoolExecutor(max_workers=self.config['max_parallel_tools']) as pool:
-                futures = {pool.submit(self._execute_one, call_id, call): call_id
+                futures = {pool.submit(self._execute_one, call_id, call, False): call_id
                            for call_id, call in batch}
                 self.active_futures = list(futures)
                 for future, call_id in futures.items():
@@ -464,13 +772,25 @@ class AgentRuntime:
                     return False
                 self.session.steps += 1
                 self.context.compact()
-                message = self.client.complete(
-                    self.context.snapshot(),
-                    tools=self.registry.schemas(),
-                    stream=self.config['stream'],
-                    on_delta=self._on_delta,
-                )
+                thinking = None
+                if not self.config['stream']:
+                    thinking = Spinner()
+                    thinking.start('[think] %s' % self.config['model'])
+                try:
+                    message = self.client.complete(
+                        self.context.snapshot(),
+                        tools=self.registry.schemas(),
+                        stream=self.config['stream'],
+                        on_delta=self._on_delta,
+                    )
+                finally:
+                    if thinking is not None:
+                        thinking.stop()
                 self._close_stream_line()
+                if message.get('content') and not self.config['stream']:
+                    # Stream mode printed the text live; non-stream gateways
+                    # need the final answer rendered here.
+                    self.emit_text(message['content'])
                 if message.get('content'):
                     self.context.add({'role': 'assistant', 'content': message['content']})
                 calls = message.get('tool_calls') or []
@@ -520,6 +840,8 @@ class AgentRuntime:
         finally:
             self.session.cancel_flag.reset()
             self.session.current_task = None
+            if not self.config.get('full_session', True):
+                self.context.forget()
 
     # ------------------------------------------------------ slash commands
 
@@ -532,6 +854,7 @@ class AgentRuntime:
   /help        this help
   /tools       list available tools
   /model       show the configured model
+  /provider    AI providers: list, add [name], use <name>, remove <name>, show [name]
   /status      session status
   /context     conversation size
   /permissions show tool permission levels
@@ -546,7 +869,12 @@ class AgentRuntime:
                 print('- %s (%s)' % (name, tool.permission), flush=True)
         elif command == '/model':
             print('Model: %s' % self.config['model'], flush=True)
-            print('Provider: %s' % self.config.get('provider', 'kilo'), flush=True)
+            print('Provider: %s' % self.provider_label(), flush=True)
+            print('Gateway: %s' % self.config.get('base_url', ''), flush=True)
+            print('Full session chat: %s' % (
+                'on' if self.config.get('full_session', True) else 'off'), flush=True)
+        elif command == '/provider':
+            self._provider_command(line)
         elif command == '/status':
             print('Session: %s' % self.session.id[:12], flush=True)
             print('Runtime: %d s' % int(self.session.elapsed()), flush=True)
@@ -575,12 +903,225 @@ class AgentRuntime:
             print('Unknown command: %s (try /help)' % command, flush=True)
         return True
 
+    # ------------------------------------------------------- /provider
+
+    @staticmethod
+    def _ask(prompt, default=None):
+        shown = '%s [%s]: ' % (prompt, default) if default else '%s: ' % prompt
+        try:
+            answer = input(shown).strip()
+        except (EOFError, KeyboardInterrupt):
+            print(flush=True)
+            raise
+        return answer or (default or '')
+
+    @staticmethod
+    def _ask_yes_no(prompt, default=False):
+        suffix = '[Y/n]' if default else '[y/N]'
+        try:
+            answer = input('%s %s ' % (prompt, suffix)).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(flush=True)
+            raise
+        if not answer:
+            return default
+        return answer in ('y', 'yes')
+
+    @staticmethod
+    def _valid_base_url(url):
+        if not url or ' ' in url:
+            return False
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return False
+        return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+
+    def _provider_command(self, line):
+        parts = line.split()
+        sub = parts[1].lower() if len(parts) > 1 else 'list'
+        argument = parts[2] if len(parts) > 2 else None
+        try:
+            if sub in ('list', 'ls'):
+                self._provider_list()
+            elif sub == 'add':
+                self._provider_add(argument)
+            elif sub == 'use':
+                self._provider_use(argument)
+            elif sub in ('remove', 'rm'):
+                self._provider_remove(argument)
+            elif sub == 'show':
+                self._provider_show(argument)
+            else:
+                print('Unknown /provider action: %s (try list, add, use, remove, show)'
+                      % sub, flush=True)
+        except (EOFError, KeyboardInterrupt):
+            print('Cancelled. Back to the prompt.', flush=True)
+
+    def _provider_list(self):
+        store = load_provider_store()
+        active = self.config.get('provider', 'kilo')
+        names = sorted(set(PROVIDER_PRESETS) | set(store.get('providers') or {}))
+        print('AI providers (* = active):', flush=True)
+        for name in names:
+            definition = resolve_provider_definition(name, store) or {}
+            marker = '*' if name == active else ' '
+            key_env = definition.get('api_key_env') or ''
+            if definition.get('key_required'):
+                state = 'set' if os.environ.get(key_env) else 'not set'
+                key_info = '%s (%s)' % (key_env, state) if key_env else 'key required'
+            else:
+                key_info = 'keyless'
+            print('%s %-16s %-16s %-22s %s' % (
+                marker, name, provider_display_label(name, definition)[:16],
+                (definition.get('model') or '?')[:22], key_info), flush=True)
+        print('Full session chat: %s' % (
+            'on' if self.config.get('full_session', True) else 'off'), flush=True)
+        print('Manage: /provider add [name] | use <name> | remove <name> | show [name]',
+              flush=True)
+
+    def _provider_show(self, name):
+        store = load_provider_store()
+        name = name or self.config.get('provider', 'kilo')
+        definition = resolve_provider_definition(name, store)
+        if definition is None:
+            print('Unknown provider: %s (see /provider list)' % name, flush=True)
+            return
+        key_env = definition.get('api_key_env') or ''
+        print('Provider: %s (%s)' % (name, provider_display_label(name, definition)),
+              flush=True)
+        print('Source: %s' % definition.get('source', 'preset'), flush=True)
+        print('Gateway: %s' % definition.get('base_url', '?'), flush=True)
+        print('Model: %s' % definition.get('model', '?'), flush=True)
+        if definition.get('key_required'):
+            state = 'set' if os.environ.get(key_env) else 'not set'
+            print('API key: read from %s (%s; the value is never shown or stored)'
+                  % (key_env, state), flush=True)
+        else:
+            print('API key: not required (works keyless)', flush=True)
+        print('Active: %s' % ('yes' if name == self.config.get('provider', 'kilo')
+                              else 'no'), flush=True)
+
+    def _provider_use(self, name):
+        if not name:
+            print('Usage: /provider use <name> (see /provider list)', flush=True)
+            return
+        store = load_provider_store()
+        definition = resolve_provider_definition(name, store)
+        if definition is None:
+            print('Unknown provider: %s (see /provider list)' % name, flush=True)
+            return
+        store['active'] = name
+        save_provider_store(store)
+        self.apply_config(load_config(store=store))
+        print('Active provider: %s (%s, model: %s)' % (
+            name, self.provider_label(), self.config['model']), flush=True)
+        key_env = definition.get('api_key_env') or ''
+        if definition.get('key_required') and not os.environ.get(key_env):
+            print('Note: %s is not set — export it before chatting.' % key_env, flush=True)
+
+    def _provider_remove(self, name):
+        if not name:
+            print('Usage: /provider remove <name>', flush=True)
+            return
+        store = load_provider_store()
+        if name not in (store.get('providers') or {}):
+            print('%s is not a custom provider (built-in presets cannot be removed).'
+                  % name, flush=True)
+            return
+        if name == store.get('active'):
+            print('%s is active — switch first with /provider use <other-name>.'
+                  % name, flush=True)
+            return
+        if self._ask_yes_no('Remove provider %s?' % name, default=False):
+            del store['providers'][name]
+            save_provider_store(store)
+            print('Removed provider: %s' % name, flush=True)
+        else:
+            print('Cancelled. Nothing was removed.', flush=True)
+
+    def _provider_add(self, name_arg=None):
+        preset = None
+        name = name_arg
+        definition = {}
+        if name and name.lower() in PROVIDER_PRESETS:
+            preset = name.lower()
+            definition = dict(PROVIDER_PRESETS[preset])
+            name = preset
+        try:
+            if not preset:
+                suggested = slugify_provider_name(name) or 'custom'
+                name = slugify_provider_name(self._ask('Provider name', suggested)) or 'custom'
+                if name in PROVIDER_PRESETS:
+                    print('%s is a built-in preset — pick another name, or run '
+                          '/provider use %s.' % (name, name), flush=True)
+                    return
+            base_url = self._ask('Gateway base URL (OpenAI-compatible /v1)',
+                                 definition.get('base_url', ''))
+            if not self._valid_base_url(base_url):
+                print('That does not look like an http(s) URL. Cancelled.', flush=True)
+                return
+            model = self._ask('Model', definition.get('model', ''))
+            if not model or ' ' in model:
+                print('A model id is required (no spaces). Cancelled.', flush=True)
+                return
+            api_key_env = self._ask('API key environment variable',
+                                    definition.get('api_key_env', 'NOXS_AI_API_KEY'))
+            if not ENV_NAME_PATTERN.match(api_key_env):
+                print('That is not a valid environment variable name. Cancelled.',
+                      flush=True)
+                return
+        except (EOFError, KeyboardInterrupt):
+            print('Cancelled. Nothing was saved.', flush=True)
+            return
+        key_present = bool(os.environ.get(api_key_env))
+        print('About to add provider:', flush=True)
+        print('  name:     %s' % name, flush=True)
+        print('  gateway:  %s' % base_url, flush=True)
+        print('  model:    %s' % model, flush=True)
+        print('  api key:  %s (%s)' % (api_key_env,
+                                     'set' if key_present else 'not set'), flush=True)
+        if not self._ask_yes_no('Save this provider?', default=False):
+            print('Cancelled. Nothing was saved.', flush=True)
+            return
+        store = load_provider_store()
+        if name in (store.get('providers') or {}):
+            print('Overwriting existing custom provider: %s' % name, flush=True)
+        store.setdefault('providers', {})[name] = {
+            'base_url': base_url,
+            'model': model,
+            'api_key_env': api_key_env,
+            'preset': preset,
+        }
+        full_session = self._ask_yes_no(
+            'Allow full session chat (the agent remembers the whole conversation)?',
+            default=True)
+        store['full_session'] = full_session
+        store['active'] = name
+        try:
+            save_provider_store(store)
+        except OSError as error:
+            print('Could not save the provider store: %s' % error.__class__.__name__,
+                  flush=True)
+            return
+        self.apply_config(load_config(store=store))
+        print('Saved. Active provider: %s (%s, model: %s)' % (
+            name, self.provider_label(), self.config['model']), flush=True)
+        if full_session:
+            print('Full session chat: on — the conversation is remembered across turns.',
+                  flush=True)
+        else:
+            print('Full session chat: off — each message starts fresh.', flush=True)
+        if not key_present and preset != 'kilo':
+            print('Note: export %s=<your key> before chatting.' % api_key_env, flush=True)
+
     # ---------------------------------------------------------------- REPL
 
     def run_interactive(self):
         print('Noxs AI Agent — model: %s (provider: %s)' % (
-            self.config['model'], BANNER_PROVIDER_LABEL), flush=True)
-        print('Type /help for commands. Ctrl+D or /exit leaves the agent.', flush=True)
+            self.config['model'], self.provider_label()), flush=True)
+        print('Type /help for commands. /provider switches gateways. '
+              'Ctrl+D or /exit leaves the agent.', flush=True)
         while True:
             try:
                 line = input('nx@ai> ')
