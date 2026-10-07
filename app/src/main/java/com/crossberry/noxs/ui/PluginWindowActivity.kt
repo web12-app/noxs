@@ -6,7 +6,7 @@
  * window card. Buffered operations (setHTML/setText) are replayed when the
  * window attaches, so plugins can configure a window before show().
  */
-package com.crossberry.noxs.runtime.plugins
+package com.crossberry.noxs.ui
 
 import android.annotation.SuppressLint
 import android.graphics.drawable.GradientDrawable
@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.crossberry.noxs.R
+import com.crossberry.noxs.runtime.plugins.NoxsPluginRuntime
 import com.crossberry.noxs.shared.NoxsLog
 
 class PluginWindowActivity : AppCompatActivity() {

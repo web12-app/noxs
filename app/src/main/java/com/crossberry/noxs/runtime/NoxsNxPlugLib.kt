@@ -53,7 +53,7 @@ nx_plug_request() {
         return 2
     fi
     local id request response attempt first
-    id="§$-$(date +%s)-$RANDOM-$RANDOM"
+    id="§$-§(date +%s)-§RANDOM-§RANDOM"
     request="§NX_PLUG_HOST/requests/§id"
     response="§NX_PLUG_HOST/responses/§id"
     rm -f "§request" "§response"

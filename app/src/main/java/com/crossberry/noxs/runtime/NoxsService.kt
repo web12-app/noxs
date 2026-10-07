@@ -448,9 +448,9 @@ class NoxsService : Service() {
         scope.launch(Dispatchers.IO) { runCatching { refreshPluginSnapshots() } }
         true to "done"
     } catch (e: com.crossberry.noxs.runtime.plugins.NoxsPluginInstaller.InstallException) {
-        false to e.message
+        false to (e.message ?: "The request could not be completed")
     } catch (e: com.crossberry.noxs.runtime.plugins.NoxsPluginManager.ManagerException) {
-        false to e.message
+        false to (e.message ?: "The request could not be completed")
     } catch (t: Throwable) {
         NoxsLog.w("NoxsService", "plugin mutation failed: ${t.javaClass.simpleName}")
         false to "The request could not be completed"

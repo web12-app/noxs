@@ -97,7 +97,13 @@ data class RegistryEntry(
     val artifact: String?,
     val checksum: String?,
     val releaseTag: String?,
-    val updatedAt: String?
+    val updatedAt: String?,
+    /* Optional detail-page fields the registry upsert carries when the
+       plugin.json declares them (spec §19 details page). */
+    val author: String? = null,
+    val license: String? = null,
+    val repository: String? = null,
+    val commands: List<String> = emptyList()
 )
 
 /** A plugin installed under ~/.noxs/plugins/<id>/ inside the active rootfs. */
@@ -176,7 +182,11 @@ object PluginJson {
                 artifact = str(p, "artifact"),
                 checksum = str(p, "checksum"),
                 releaseTag = str(p, "releaseTag"),
-                updatedAt = str(p, "updatedAt")
+                updatedAt = str(p, "updatedAt"),
+                author = str(p, "author"),
+                license = str(p, "license"),
+                repository = str(p, "repository"),
+                commands = strings(p, "commands")
             )
         }
         return format to plugins

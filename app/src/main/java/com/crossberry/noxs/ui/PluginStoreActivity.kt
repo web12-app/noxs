@@ -88,7 +88,9 @@ class PluginStoreActivity : AppCompatActivity() {
         statusView.text = getString(R.string.plugin_store_loading)
         statusView.visibility = TextView.VISIBLE
         scope.launch(Dispatchers.IO) {
-            val loaded = runCatching { manager?.storeCards(refresh = true) }.getOrDefault(emptyList())
+            val loaded = manager?.let { m ->
+                runCatching { m.storeCards(refresh = true) }.getOrDefault(emptyList())
+            } ?: emptyList()
             scope.launch {
                 cards = loaded
                 applyFilter()
