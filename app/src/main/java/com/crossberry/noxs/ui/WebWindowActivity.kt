@@ -221,15 +221,21 @@ class WebWindowActivity : AppCompatActivity() {
     }
 
     private fun buildWebView(initialUrl: String) {
-        webView = WebView(this).apply {
+        // Build into a local first: the lateinit webView property is only
+        // assigned AFTER construction, so any helper reading the property
+        // inside this expression would crash with UninitializedProperty-
+        // AccessException (device-reported: lateinit property webView has
+        // not been initialized). configureWebView receives the instance.
+        val view = WebView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
             setBackgroundColor(0xFF0F1216.toInt())
-            configureWebView()
         }
-        windowCard.addView(webView)
+        configureWebView(view)
+        windowCard.addView(view)
 
+        webView = view
         webView.webViewClient = NoxsWebClient()
         webView.webChromeClient = NoxsChromeClient()
         webView.setDownloadListener(NoxsDownloadListener())
@@ -239,8 +245,8 @@ class WebWindowActivity : AppCompatActivity() {
         restoreCookies()
     }
 
-    private fun configureWebView() {
-        webView.settings.apply {
+    private fun configureWebView(view: WebView) {
+        view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             builtInZoomControls = true
@@ -259,7 +265,7 @@ class WebWindowActivity : AppCompatActivity() {
         // Isolation (spec §19): no JavascriptInterface of any kind is exposed
         // to external websites. window.nx exists ONLY inside package WebViews
         // (NoxsPackageWebViewHost), never here.
-        webView.isFocusableInTouchMode = true
+        view.isFocusableInTouchMode = true
     }
 
     private fun restoreCookies() {
@@ -659,7 +665,11 @@ class WebWindowActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        NoxsWebWindowManager.unregister(windowId)
+        // A rejected URL finishes in onCreate before any field is assigned;
+        // never touch the lateinit registry id in that path.
+        if (this::windowId.isInitialized) {
+            NoxsWebWindowManager.unregister(windowId)
+        }
         if (this::webView.isInitialized) {
             webView.stopLoading()
             (webView.parent as? ViewGroup)?.removeView(webView)
