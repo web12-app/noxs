@@ -122,7 +122,7 @@ class NoxsPluginBridgeTest {
             updateAvailable = false
         )
         bridge.writeSnapshots(listOf(card), emptyList())
-        val catalog = File(paths.pluginCatalogSnapshot).readText(Charsets.UTF_8)
+        val catalog = paths.pluginCatalogSnapshot.readText(Charsets.UTF_8)
         assertTrue(catalog.startsWith("hello\tHello\t1.0.0\tUtilities\tdemo,starter\tExample Noxs plugin\tavailable\t-"))
         assertTrue(catalog.endsWith("\n"))
 
@@ -135,7 +135,7 @@ class NoxsPluginBridgeTest {
             enabled = false
         )
         bridge.writeSnapshots(listOf(card), listOf(installedPlugin))
-        val installedText = File(paths.pluginInstalledSnapshot).readText(Charsets.UTF_8)
+        val installedText = paths.pluginInstalledSnapshot.readText(Charsets.UTF_8)
         assertEquals("hello\tHello\t1.0.0\tdisabled\n", installedText)
     }
 

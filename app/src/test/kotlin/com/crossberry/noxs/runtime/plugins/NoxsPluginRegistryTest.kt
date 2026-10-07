@@ -23,7 +23,7 @@ class NoxsPluginRegistryTest {
         id: String,
         name: String = id,
         description: String = "$id description",
-        category: String = "Utilities",
+        category: String? = "Utilities",
         keywords: List<String> = emptyList()
     ) = RegistryEntry(
         id = id, name = name, version = "1.0.0", description = description,

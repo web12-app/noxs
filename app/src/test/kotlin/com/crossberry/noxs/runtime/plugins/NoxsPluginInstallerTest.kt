@@ -27,7 +27,7 @@ class NoxsPluginInstallerTest {
     // ----------------------------------------------------- tar.gz fixtures
 
     /** Minimal ustar header builder (same approach as RootfsExtractorTest). */
-    private fun tarHeader(name: String, size: Long, typeFlag: Byte, mode: Int = 0o644): ByteArray {
+    private fun tarHeader(name: String, size: Long, typeFlag: Byte, mode: Int = 420 /* octal 0644 */): ByteArray {
         val header = ByteArray(512)
         fun put(s: String, off: Int, len: Int) {
             val bytes = s.toByteArray(Charsets.US_ASCII)
