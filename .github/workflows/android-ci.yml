@@ -55,7 +55,19 @@ jobs:
           fi
 
       - name: Build + unit tests
-        run: ./gradlew assembleDebug assembleRelease testDebugUnitTest :terminal-emulator:test --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug assembleRelease testDebugUnitTest :terminal-emulator:test --stacktrace 2>&1 | tee gradle-build.log
+
+      - name: Surface gradle failures
+        if: failure()
+        run: |
+          grep -E "^e: |> Task .*FAILED|BUILD FAILED|Compilation error|FAILED" gradle-build.log \
+            | head -30 | while IFS= read -r line; do echo "::error title=gradle::$line"; done
+          sed -n '/\* What went wrong/,/\* Try:/p' gradle-build.log | head -25 \
+            | while IFS= read -r line; do echo "::error title=gradle-cause::$line"; done
+          grep -E "tests? (completed|failed)|There (was|were) .* failures" gradle-build.log \
+            | head -10 | while IFS= read -r line; do echo "::error title=test-summary::$line"; done
 
       - name: Verify debug APK application ID
         run: |
@@ -90,11 +102,19 @@ jobs:
       - name: Validate manifests, sync, shell tooling
         run: |
           chmod +x scripts/*.sh linux-runtime/**/*.sh 2>/dev/null || true
-          scripts/test.sh --manifests
-          scripts/test.sh --sync-check
-          scripts/test.sh --scripts
-          scripts/test.sh --nx
-          scripts/test.sh --ai
+          set -o pipefail
+          for suite in manifests sync-check scripts nx ai; do
+            echo "=== suite: $suite ==="
+            if scripts/test.sh "--$suite" 2>&1 | tee "validate-$suite.log"; then
+              echo "SUITE $suite: PASS"
+            else
+              echo "SUITE $suite: FAIL"
+              grep -E "FAILED|BAD |Traceback|error|Error|DIFF" "validate-$suite.log" | head -20 \
+                | while IFS= read -r line; do echo "::error title=validation [$suite]::$line"; done
+              tail -n 15 "validate-$suite.log"
+              exit 1
+            fi
+          done
 
       - name: Filesystem security tests (JVM)
         uses: actions/setup-java@v4
@@ -110,7 +130,16 @@ jobs:
         run: |
           chmod +x gradlew 2>/dev/null || true
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then gradle wrapper --gradle-version 8.7; fi
-          ./gradlew noxs-shared:test terminal-emulator:test
+          set -o pipefail
+          ./gradlew noxs-shared:test terminal-emulator:test 2>&1 | tee security-tests.log
+
+      - name: Surface security test failures
+        if: failure()
+        run: |
+          grep -E "^e: |> Task .*FAILED|FAILED|What went wrong|tests? failed|Compilation error" security-tests.log \
+            | head -30 | while IFS= read -r line; do echo "::error title=security-tests::$line"; done
+          sed -n '/\* What went wrong/,/\* Try:/p' security-tests.log | head -25 \
+            | while IFS= read -r line; do echo "::error title=security-cause::$line"; done
 
   rust-core:
     name: Rust core (noxs-core)

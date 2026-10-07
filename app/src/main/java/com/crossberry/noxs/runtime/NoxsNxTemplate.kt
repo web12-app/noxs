@@ -72,6 +72,11 @@ Environments (Multi-Env Manager):
   nx env remove <id>                   Remove an installed environment
   nx env use <id>                      Set the active environment
 
+VPN (Tor):
+  nx vpn                              Install (if needed) + activate Tor
+  nx vpn stop|status|test             Manage the Tor daemon
+  nx vpn on|off                       Route new shells through Tor (global)
+
 AI:
   nx ai                                Interactive Noxs AI Agent (nx@ai>)
   nx ai "task"                         One-shot task, then exit
@@ -160,6 +165,13 @@ case "§{1:-}" in
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/env-lib.sh"
         nx_env_cmd "§@"
+        ;;
+    vpn)
+        shift                       # drop "vpn", forward the subcommand
+        # Tor over PRoot (VPN mode): install/activate/stop/status/test/on/off.
+        # shellcheck source=/dev/null
+        . "§NX_LIB_DIR/vpn-lib.sh"
+        nx_vpn_cmd "§@"
         ;;
     ai)
         shift                       # drop "ai", forward only the task/options
