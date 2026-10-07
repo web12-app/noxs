@@ -34,6 +34,12 @@ class NoxsPaths(baseDir: File, val nativeLibDir: File? = null) {
     val webControl: File = File(run, "web")
     val webRequests: File = File(webControl, "requests")
     val webResponses: File = File(webControl, "responses")
+    // Guest→Android `nx env` bridge (environment list / install / remove / use)
+    val envControl: File = File(run, "env")
+    val envRequests: File = File(envControl, "requests")
+    val envResponses: File = File(envControl, "responses")
+    val envSnapshot: File = File(envControl, "registry.txt")
+    val envProvidersSnapshot: File = File(envControl, "providers.txt")
     val cache: File = File(base, NoxsConstants.ANDROID_CACHE_DIR)
     val logs: File = File(base, NoxsConstants.ANDROID_LOGS_DIR)
     val tmp: File = File(base, NoxsConstants.ANDROID_TMP_DIR)
@@ -63,7 +69,7 @@ class NoxsPaths(baseDir: File, val nativeLibDir: File? = null) {
     val noxsResourcesConf: File = File(rootfs, "etc/noxs/resources.conf")
 
     fun ensureBaseDirs(): Boolean =
-        listOf(base, bin, run, storageRequests, storageResponses, storagePayloads, storageResponsePayloads, webRequests, webResponses, cache, logs, tmp)
+        listOf(base, bin, run, storageRequests, storageResponses, storagePayloads, storageResponsePayloads, webRequests, webResponses, envRequests, envResponses, cache, logs, tmp)
             .all { it.isDirectory || it.mkdirs() }
 
     fun isInstalled(): Boolean = installMarker.isFile && prootBinary.isFile && rootfs.isDirectory

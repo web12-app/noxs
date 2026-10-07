@@ -95,6 +95,8 @@ data class TerminalSettings(
     val restoreSessions: Boolean = true,
     val autoFocusTerminal: Boolean = true,
     val preserveScrollPosition: Boolean = true,
+    /** Open the terminal with the chrome hidden (Ctrl+F toggles any time). */
+    val startInFullscreen: Boolean = false,
     // Advanced
     val reduceAnimations: Boolean = false,
     val textAntialias: Boolean = true,
@@ -185,6 +187,7 @@ object TerminalSettingsStore {
     private const val K_RESTORE_SESSIONS = "terminal.restoreSessions"
     private const val K_AUTO_FOCUS_TERMINAL = "terminal.autoFocusTerminal"
     private const val K_PRESERVE_SCROLL_POSITION = "terminal.preserveScrollPosition"
+    private const val K_START_FULLSCREEN = "terminal.startFullscreen"
     private const val K_REDUCE_ANIMATIONS = "terminal.reduceAnimations"
     private const val K_TEXT_ANTIALIAS = "terminal.textAntialias"
     private const val K_DEBUG_OVERLAY = "terminal.debugOverlay"
@@ -227,6 +230,7 @@ object TerminalSettingsStore {
             restoreSessions = prefs.getBoolean(K_RESTORE_SESSIONS, d.restoreSessions),
             autoFocusTerminal = prefs.getBoolean(K_AUTO_FOCUS_TERMINAL, d.autoFocusTerminal),
             preserveScrollPosition = prefs.getBoolean(K_PRESERVE_SCROLL_POSITION, d.preserveScrollPosition),
+            startInFullscreen = prefs.getBoolean(K_START_FULLSCREEN, d.startInFullscreen),
             reduceAnimations = prefs.getBoolean(K_REDUCE_ANIMATIONS, d.reduceAnimations),
             textAntialias = prefs.getBoolean(K_TEXT_ANTIALIAS, d.textAntialias),
             debugOverlay = prefs.getBoolean(K_DEBUG_OVERLAY, d.debugOverlay)
@@ -261,6 +265,7 @@ object TerminalSettingsStore {
         prefs.putBoolean(K_RESTORE_SESSIONS, s.restoreSessions)
         prefs.putBoolean(K_AUTO_FOCUS_TERMINAL, s.autoFocusTerminal)
         prefs.putBoolean(K_PRESERVE_SCROLL_POSITION, s.preserveScrollPosition)
+        prefs.putBoolean(K_START_FULLSCREEN, s.startInFullscreen)
         prefs.putBoolean(K_REDUCE_ANIMATIONS, s.reduceAnimations)
         prefs.putBoolean(K_TEXT_ANTIALIAS, s.textAntialias)
         prefs.putBoolean(K_DEBUG_OVERLAY, s.debugOverlay)

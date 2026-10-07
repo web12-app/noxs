@@ -205,6 +205,12 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.terminal.onIndicatorChanged = { label ->
             binding.btnTerminalLatest.text = label?.let { "↓ $it" } ?: getString(R.string.terminal_latest)
         }
+        // Settings → Terminal → Behavior → Start in full screen: launch with
+        // the top options hidden. Ctrl+F still toggles at any time.
+        if (terminalSettings.startInFullscreen) {
+            fullscreenMode = true
+            applyFullscreenUi()
+        }
 
         // Status widget ticker
         lifecycleScope.launch {

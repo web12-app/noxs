@@ -173,6 +173,7 @@ object RootfsConfigurator {
             "pkg-dev.sh" to NoxsNxPkgDev.PKG_DEV,
             "pkg-install.sh" to NoxsNxPkgInstall.PKG_INSTALL,
             "web-lib.sh" to NoxsNxWebTemplate.WEB_LIB,
+            "env-lib.sh" to NoxsNxEnvLib.ENV_LIB,
             "ai-lib.sh" to NoxsNxAiLib.AI_LIB
         ).forEach { (name, content) ->
             val f = File(libDir, name)
@@ -257,7 +258,8 @@ object RootfsConfigurator {
         installNxPackageSystem(rootfs)
     }
 
-    private val NX_PACKAGE_SYSTEM_VERSION = "4"
+    // 5: adds env-lib.sh (nx env Multi-Env Manager CLI) to existing environments
+    private val NX_PACKAGE_SYSTEM_VERSION = "5"
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

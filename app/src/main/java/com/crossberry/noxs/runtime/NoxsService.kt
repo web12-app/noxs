@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class NoxsService : Service() {
@@ -62,6 +63,12 @@ class NoxsService : Service() {
     private var webObserver: FileObserver? = null
     private var webObservedPath: String? = null
 
+    // Guest→Android `nx env` bridge (Multi-Env Manager CLI): same transport
+    // pattern — request/response files plus host-written state snapshots.
+    private var envBridge: NoxsEnvBridge? = null
+    private var envObserver: FileObserver? = null
+    private var envObservedPath: String? = null
+
     override fun onCreate() {
         super.onCreate()
         val app = application as com.crossberry.noxs.NoxsApplication
@@ -91,6 +98,7 @@ class NoxsService : Service() {
         socketServer.start()
         refreshKeepAwake()
         startWebWindowBridge()
+        startEnvBridge()
 
         // Migration: environments installed by earlier Noxs versions gain the
         // `nx` package system (CLI + templates) without a reinstall. Cheap,
@@ -184,11 +192,174 @@ class NoxsService : Service() {
             .onFailure { NoxsLog.w("NoxsService", "web window launch failed: ${it.javaClass.simpleName}") }
     }
 
+    // -------------------------------------------------- nx env bridge (multi-env)
+
+    /**
+     * `nx env` support (Multi-Env Manager): watch the environment bridge
+     * request directory for the whole service lifetime and mirror the
+     * environment registry + setup tasks into snapshots the CLI can read.
+     */
+    private fun startEnvBridge() {
+        val app = application as com.crossberry.noxs.NoxsApplication
+        val manager = app.environments
+        val bridge = NoxsEnvBridge(paths)
+        envBridge = bridge
+        bridge.onInstall = { _, providerId, variantId, password ->
+            handleEnvInstall(providerId, variantId, password)
+        }
+        bridge.onRemove = { _, environmentId -> handleEnvRemove(environmentId) }
+        bridge.onUse = { _, environmentId -> handleEnvUse(environmentId) }
+        runCatching { bridge.ensureControlDirectories() }
+            .onFailure { NoxsLog.w("NoxsService", "env bridge unavailable: ${it.javaClass.simpleName}") }
+        armEnvObserver(force = true)
+        scope.launch(Dispatchers.IO) {
+            runCatching { bridge.processPendingRequests() }
+        }
+        // Live snapshots: every registry/task change rewrites registry.txt.
+        scope.launch(Dispatchers.IO) {
+            combine(
+                manager.environments,
+                manager.activeId,
+                manager.taskManager.tasks
+            ) { environments, activeId, tasks -> Triple(environments, activeId, tasks) }
+                .collect { (environments, activeId, tasks) ->
+                    runCatching { envBridge?.writeSnapshot(environments, activeId, tasks, manager.providers) }
+                }
+        }
+    }
+
+    private fun armEnvObserver(force: Boolean) {
+        val path = paths.envRequests.absolutePath
+        if (!force && envObserver != null && envObservedPath == path) return
+        envObserver?.stopWatching()
+        envObserver = null
+        envObservedPath = null
+        val requestMask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+        val invalidatedMask = FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
+        val observer = object : FileObserver(path, requestMask or invalidatedMask) {
+            override fun onEvent(event: Int, name: String?) {
+                if ((event and invalidatedMask) != 0) {
+                    mainHandler.post {
+                        envObserver?.stopWatching()
+                        envObserver = null
+                        envObservedPath = null
+                        runCatching { startEnvBridge() }
+                    }
+                    return
+                }
+                if (name == null || (event and requestMask) == 0) return
+                scope.launch(Dispatchers.IO) {
+                    runCatching { envBridge?.processPendingRequests() }
+                }
+            }
+        }
+        runCatching { observer.startWatching() }.onSuccess {
+            envObserver = observer
+            envObservedPath = path
+        }.onFailure {
+            NoxsLog.w("NoxsService", "cannot watch env bridge: ${it.javaClass.simpleName}")
+        }
+    }
+
+    /** CLI install request: validated here, then handed to the SetupTaskManager. */
+    private fun handleEnvInstall(
+        providerId: String,
+        variantId: String,
+        password: CharArray?
+    ): Pair<Boolean, String> {
+        val app = application as com.crossberry.noxs.NoxsApplication
+        val manager = app.environments
+        fun reject(message: String): Pair<Boolean, String> {
+            password?.fill('\u0000')
+            return false to message
+        }
+        if (providerId.isBlank()) return reject("Environment provider is required")
+        val provider = manager.providers.firstOrNull { it.id == providerId }
+            ?: return reject("Unknown environment provider: $providerId")
+        val variants = provider.variants()
+        if (variants.isEmpty()) return reject("'${provider.displayName}' cannot be installed from this device")
+        val variant = variants.firstOrNull { it.id == variantId }
+            ?: variants.firstOrNull { it.isDefault }
+            ?: variants.first()
+        val existing = manager.environmentFor(providerId)
+        if (existing != null && (existing.status == com.crossberry.noxs.environments.model.EnvironmentStatus.READY ||
+                manager.taskManager.isRunning(providerId))
+        ) {
+            return reject("Environment '$providerId' is already installed or installing")
+        }
+        val device = com.crossberry.noxs.environments.AndroidDeviceProfile.probe(this)
+        if (!provider.canInstall(device)) {
+            return reject("'${provider.displayName}' is not installable on this device")
+        }
+        val env = com.crossberry.noxs.environments.model.Environment(
+            id = providerId,
+            providerId = provider.id,
+            displayName = provider.displayName,
+            version = "",
+            architecture = device.abi,
+            variant = variant.id,
+            status = com.crossberry.noxs.environments.model.EnvironmentStatus.INSTALLING,
+            storagePath = java.io.File(manager.environmentsRoot, providerId).absolutePath,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        manager.upsert(env)
+        // The pipeline invokes passwordProvider once and zeroes the array
+        // after chpasswd; on early cancel the array is memory-only and dies
+        // with the process — never persisted anywhere.
+        manager.taskManager.startInstall(provider, variant, env, passwordProvider = { password })
+        NoxsLog.i("NoxsService", "env install started: $providerId (${variant.id})")
+        return true to providerId
+    }
+
+    /** CLI remove request: refuses the environment the terminal runs in. */
+    private fun handleEnvRemove(environmentId: String): Pair<Boolean, String> {
+        val app = application as com.crossberry.noxs.NoxsApplication
+        val manager = app.environments
+        if (environmentId.isBlank()) return false to "Environment id is required"
+        val env = manager.environmentFor(environmentId)
+            ?: return false to "Environment '$environmentId' is not installed"
+        if (environmentId == manager.activeId.value) {
+            return false to "Cannot remove the environment this terminal runs in — switch first (nx env use <id>)"
+        }
+        if (manager.taskManager.isRunning(environmentId)) {
+            return false to "An install for '$environmentId' is running — cancel it first"
+        }
+        return if (manager.remove(environmentId)) {
+            NoxsLog.i("NoxsService", "env removed via CLI: $environmentId")
+            true to "removed"
+        } else {
+            false to "Could not remove '$environmentId'"
+        }
+    }
+
+    /** CLI switch request: sets the active environment; applied on restart. */
+    private fun handleEnvUse(environmentId: String): Pair<Boolean, String> {
+        val app = application as com.crossberry.noxs.NoxsApplication
+        val manager = app.environments
+        if (environmentId.isBlank()) return false to "Environment id is required"
+        val env = manager.environmentFor(environmentId)
+            ?: return false to "Environment '$environmentId' is not installed"
+        if (env.status != com.crossberry.noxs.environments.model.EnvironmentStatus.READY) {
+            return false to "'$environmentId' is not ready (status: ${env.status.name.lowercase()})"
+        }
+        if (environmentId == manager.activeId.value) return true to "already active"
+        return if (manager.setActive(environmentId)) {
+            NoxsLog.i("NoxsService", "env activated via CLI: $environmentId")
+            true to "active"
+        } else {
+            false to "Could not switch to '$environmentId'"
+        }
+    }
+
     override fun onDestroy() {
         releaseKeepAwake()
         webObserver?.stopWatching()
         webObserver = null
         webWindowBridge = null
+        envObserver?.stopWatching()
+        envObserver = null
+        envBridge = null
         socketServer.stop()
         sessions.closeAll()
         // The service is going away: reconcile records so the Activity Center

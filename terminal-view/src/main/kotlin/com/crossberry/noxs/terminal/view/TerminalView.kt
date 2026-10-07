@@ -903,6 +903,14 @@ class TerminalView @JvmOverloads constructor(
     fun sendBytes(data: ByteArray) {
         if (ctrlLatch && data.size == 1) {
             val ch = data[0].toInt() and 0xff
+            // Ctrl+F is an app-level shortcut (full screen), never a shell
+            // byte: soft keyboards commit text via this path (the hardware
+            // path is handled in onKeyDown), so honor the latch here too.
+            if (ch == 'f'.code || ch == 'F'.code) {
+                clearLatches()
+                onToggleFullscreen?.invoke()
+                return
+            }
             val ctrlByte = (ch and 0x1f).toByte()
             session?.write(byteArrayOf(ctrlByte))
             clearLatches()

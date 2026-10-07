@@ -139,6 +139,19 @@ class TerminalSettingsTest {
         assertTrue(s.followLiveOutput)
     }
 
+    @Test
+    fun `start in fullscreen defaults off and round-trips`() {
+        val fresh = InMemoryTerminalPrefs()
+        assertFalse(TerminalSettingsStore.load(fresh).startInFullscreen)
+        val prefs = InMemoryTerminalPrefs()
+        val s = TerminalSettingsStore.putBoolean(prefs, "terminal.startFullscreen", true)
+        assertTrue(s.startInFullscreen)
+        assertEquals(true, prefs.booleans["terminal.startFullscreen"])
+        // Reset wipes it like every other terminal.* key.
+        TerminalSettingsStore.reset(prefs)
+        assertFalse(TerminalSettingsStore.load(prefs).startInFullscreen)
+    }
+
     // ---- reset contract (spec 25) ----
 
     @Test

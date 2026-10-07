@@ -362,6 +362,8 @@
     <string name="settings_auto_focus_desc">Open the keyboard when a session attaches</string>
     <string name="settings_preserve_scroll">Preserve scroll position</string>
     <string name="settings_preserve_scroll_desc">Return to where you were reading after switching away</string>
+    <string name="settings_start_fullscreen">Start in full screen</string>
+    <string name="settings_start_fullscreen_desc">Open the terminal with the top options hidden — Ctrl+F toggles it any time</string>
 
     <!-- Multi-environment manager (spec §1-§55) -->
     <string name="env_welcome_title">Welcome to Noxs</string>

@@ -23,6 +23,7 @@ SHELL_CONSTANTS = {
     "PKG_DEV": ("NoxsNxPkgDev.kt", "linux-runtime/nx/pkg-dev.sh"),
     "PKG_INSTALL": ("NoxsNxPkgInstall.kt", "linux-runtime/nx/pkg-install.sh"),
     "WEB_LIB": ("NoxsNxWebTemplate.kt", "linux-runtime/nx/web-lib.sh"),
+    "ENV_LIB": ("NoxsNxEnvLib.kt", "linux-runtime/nx/env-lib.sh"),
     "AI_LIB": ("NoxsNxAiLib.kt", "linux-runtime/nx/ai-lib.sh"),
 }
 

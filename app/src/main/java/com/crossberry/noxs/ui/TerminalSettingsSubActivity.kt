@@ -292,6 +292,12 @@ class TerminalSettingsSubActivity : AppCompatActivity() {
             getString(R.string.settings_preserve_scroll_desc),
             s.preserveScrollPosition
         ) { checked -> TerminalSettingsStore.putBoolean(prefs, "terminal.preserveScrollPosition", checked) })
+        stack.addView(w.switchRow(
+            this,
+            getString(R.string.settings_start_fullscreen),
+            getString(R.string.settings_start_fullscreen_desc),
+            s.startInFullscreen
+        ) { checked -> TerminalSettingsStore.putBoolean(prefs, "terminal.startFullscreen", checked) })
     }
 
     companion object {
