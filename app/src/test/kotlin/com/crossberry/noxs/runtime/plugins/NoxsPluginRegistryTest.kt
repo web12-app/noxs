@@ -43,8 +43,11 @@ class NoxsPluginRegistryTest {
         )
         val registry = registry()
         assertEquals(3, registry.search(entries, "").size)
-        // "hell" also matches the keyword "shell" — both must come back.
-        assertEquals(listOf("hello", "sysmon"), registry.search(entries, "hell").map { it.id })
+        // "hell" matches hello (id/name) AND both keyword "shell" entries.
+        assertEquals(
+            listOf("hello", "term-tools", "sysmon"),
+            registry.search(entries, "hell").map { it.id }
+        )
         assertEquals(listOf("term-tools"), registry.search(entries, "TERMINAL too").map { it.id })
         assertEquals(listOf("sysmon"), registry.search(entries, "cpu").map { it.id })
         assertEquals(listOf("term-tools", "sysmon"), registry.search(entries, "shell").map { it.id })
