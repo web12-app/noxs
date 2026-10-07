@@ -31,7 +31,7 @@ class NoxsNxPackageSystemTest {
         val nx = File(paths.rootfs, "usr/local/bin/nx")
         assertTrue(nx.isFile)
         assertTrue(nx.canExecute())
-        for (module in listOf("pkg-lib.sh", "pkg-init.sh", "pkg-dev.sh", "pkg-install.sh")) {
+        for (module in listOf("pkg-lib.sh", "pkg-init.sh", "pkg-dev.sh", "pkg-install.sh", "plug-lib.sh")) {
             val f = File(paths.rootfs, "usr/local/lib/noxs-pkg/$module")
             assertTrue("missing $module", f.isFile)
             assertTrue("not executable: $module", f.canExecute())
@@ -92,7 +92,19 @@ class NoxsNxPackageSystemTest {
         assertTrue(cli.contains("info)"))
         assertTrue(cli.contains("update)"))
         assertTrue(cli.contains("remove|uninstall)"))
+        assertTrue(cli.contains("plug)"))
         assertTrue(cli.contains("noxs-pkg"))
+    }
+
+    @Test fun `plug-lib ships the Plugin Store CLI contract`() {
+        val lib = NoxsNxPlugLib.PLUG_LIB
+        assertTrue(lib.contains("nx_plug_request"))
+        assertTrue(lib.contains("nx_plug_cmd"))
+        assertTrue(lib.contains("NX_PLUG_HOST"))
+        assertTrue(lib.contains("catalog.txt"))
+        assertTrue(lib.contains("plugins.txt"))
+        // The plugin bridge never runs metadata as code (spec §19).
+        assertFalse("eval must not be used", lib.contains(Regex("""\beval\b""")))
     }
 
     // ------------------------------------------------------ security checks

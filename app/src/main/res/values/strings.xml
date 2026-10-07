@@ -489,4 +489,45 @@
     <string name="perm_group_system">System integration</string>
     <string name="perm_group_environment">Noxs environment access</string>
 
+    <!-- Plugin Store -->
+    <string name="nav_plugins">Plugins</string>
+    <string name="plugin_store_title">Plugins</string>
+    <string name="plugin_store_search_hint">Search plugins…</string>
+    <string name="plugin_store_loading">Loading plugins…</string>
+    <string name="plugin_store_empty">The Noxs Plugin Store is unavailable right now. Check your connection and try again.</string>
+    <string name="plugin_store_no_results">No plugins match your search.</string>
+    <string name="plugin_store_no_updates">Everything is up to date.</string>
+    <string name="plugin_filter_all">All</string>
+    <string name="plugin_filter_installed">Installed</string>
+    <string name="plugin_filter_updates">Updates</string>
+    <string name="plugin_action_install">Install</string>
+    <string name="plugin_action_update">Update</string>
+    <string name="plugin_action_open">Open</string>
+    <string name="plugin_action_enable">Enable</string>
+    <string name="plugin_action_disable">Disable</string>
+    <string name="plugin_action_uninstall">Uninstall</string>
+    <string name="plugin_action_working">Working…</string>
+    <string name="plugin_installing_toast">Installing plugin…</string>
+    <string name="plugin_installed_toast">%1$s installed</string>
+    <string name="plugin_install_failed_toast">Unable to install plugin.</string>
+    <string name="plugin_enabled_toast">%1$s enabled</string>
+    <string name="plugin_opened_toast">Plugin activated</string>
+    <string name="plugin_action_failed">The action could not be completed.</string>
+    <string name="plugin_uninstall_title">Uninstall %1$s?</string>
+    <string name="plugin_uninstall_message">The plugin and its files will be removed from the Noxs environment.</string>
+    <string name="plugin_details_back">← </string>
+    <string name="plugin_details_title">Plugin Details</string>
+    <string name="plugin_details_author">Author</string>
+    <string name="plugin_details_license">License</string>
+    <string name="plugin_details_category">Category</string>
+    <string name="plugin_details_minimum">Requires Noxs</string>
+    <string name="plugin_details_repository">Repository</string>
+    <string name="plugin_details_permissions">Permissions</string>
+    <string name="plugin_details_permission_row">✓ %1$s</string>
+    <string name="plugin_details_no_permissions">This plugin declares no permissions.</string>
+    <string name="plugin_details_commands">Commands: %1$s</string>
+    <string name="plugin_details_readme">README</string>
+    <string name="plugin_details_readme_missing">No README is published for this plugin yet.</string>
+    <string name="title_plugin_window">Plugin window</string>
+
 </resources>

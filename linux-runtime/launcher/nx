@@ -15,6 +15,8 @@
 #   nx ow <url>          Open a URL in the Noxs floating browser window
 #   nx ai [task]         Noxs AI Agent Terminal (interactive or one-shot)
 #   nx env <cmd>         Multi-Env Manager (list / install / remove / use)
+#   nx vpn <cmd>         Tor over PRoot (VPN mode)
+#   nx plug <cmd>        Noxs Plugin Store (open / search / install / ...)
 #
 # Every other command is forwarded to the noxs CLI, so all noxs commands
 # are allowed through nx as well:
@@ -61,6 +63,14 @@ VPN (Tor):
   nx vpn                              Install (if needed) + activate Tor
   nx vpn stop|status|test             Manage the Tor daemon
   nx vpn on|off                       Route new shells through Tor (global)
+
+Plugin Store:
+  nx plug                             Open the Noxs Plugin Store UI
+  nx plug search <query>              Search plugins
+  nx plug list                        Installed plugins
+  nx plug info <id>                   Plugin metadata
+  nx plug install|update|uninstall <id>
+  nx plug enable|disable <id>
 
 AI:
   nx ai                                Interactive Noxs AI Agent (nx@ai>)
@@ -157,6 +167,14 @@ case "${1:-}" in
         # shellcheck source=/dev/null
         . "$NX_LIB_DIR/vpn-lib.sh"
         nx_vpn_cmd "$@"
+        ;;
+    plug)
+        shift                       # drop "plug", forward the subcommand
+        # Noxs Plugin Store: bare `nx plug` opens the store UI; the
+        # subcommands use the same Plugin Manager as the Plugins screen.
+        # shellcheck source=/dev/null
+        . "$NX_LIB_DIR/plug-lib.sh"
+        nx_plug_cmd "$@"
         ;;
     ai)
         shift                       # drop "ai", forward only the task/options

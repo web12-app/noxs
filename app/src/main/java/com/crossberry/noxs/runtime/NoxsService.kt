@@ -24,6 +24,8 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.crossberry.noxs.R
 import com.crossberry.noxs.shared.NoxsLog
+import com.crossberry.noxs.ui.PluginStoreActivity
+import com.crossberry.noxs.ui.PluginWindowActivity
 import com.crossberry.noxs.ui.WebWindowActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +71,13 @@ class NoxsService : Service() {
     private var envObserver: FileObserver? = null
     private var envObservedPath: String? = null
 
+    // Guest→Android `nx plug` bridge (Noxs Plugin Store CLI): requests for
+    // open/install/uninstall/enable/disable/update plus catalog snapshots.
+    private var pluginBridge: com.crossberry.noxs.runtime.plugins.NoxsPluginBridge? = null
+    private var pluginObserver: FileObserver? = null
+    private var pluginObservedPath: String? = null
+    private var pluginManager: com.crossberry.noxs.runtime.plugins.NoxsPluginManager? = null
+
     override fun onCreate() {
         super.onCreate()
         val app = application as com.crossberry.noxs.NoxsApplication
@@ -99,6 +108,7 @@ class NoxsService : Service() {
         refreshKeepAwake()
         startWebWindowBridge()
         startEnvBridge()
+        startPluginBridge()
 
         // Migration: environments installed by earlier Noxs versions gain the
         // `nx` package system (CLI + templates) without a reinstall. Cheap,
@@ -352,6 +362,153 @@ class NoxsService : Service() {
         }
     }
 
+    // ------------------------------------------------ nx plug bridge (Plugin Store)
+
+    /**
+     * `nx plug` support (Noxs Plugin Store): watch the plugin bridge request
+     * directory for the whole service lifetime, publish catalog/installed
+     * snapshots for the CLI list/search/info commands, and route mutations
+     * through the single NoxsPluginManager used by the store UI.
+     */
+    private fun startPluginBridge() {
+        val app = application as com.crossberry.noxs.NoxsApplication
+        val manager = com.crossberry.noxs.runtime.plugins.NoxsPluginManager(
+            rootfsHome = paths.rootfsHomeNoxs,
+            cacheDir = app.cacheDir,
+            appVersion = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull() ?: "0.0.0"
+        )
+        pluginManager = manager
+        val bridge = com.crossberry.noxs.runtime.plugins.NoxsPluginBridge(paths)
+        pluginBridge = bridge
+        bridge.onOpenStore = {
+            mainHandler.post { openPluginStore() }
+        }
+        bridge.onInstall = { _, pluginId -> handlePluginMutation { manager.install(pluginId); null } }
+        bridge.onUninstall = { _, pluginId -> handlePluginMutation { manager.uninstall(pluginId); null } }
+        bridge.onEnable = { _, pluginId -> handlePluginMutation { manager.enable(pluginId); null } }
+        bridge.onDisable = { _, pluginId -> handlePluginMutation { manager.disable(pluginId); null } }
+        bridge.onUpdate = { _, pluginId -> handlePluginMutation { manager.update(pluginId); null } }
+        runCatching { bridge.ensureControlDirectories() }
+            .onFailure { NoxsLog.w("NoxsService", "plugin bridge unavailable: ${it.javaClass.simpleName}") }
+        armPluginObserver(force = true)
+        scope.launch(Dispatchers.IO) {
+            runCatching { bridge.processPendingRequests() }
+            runCatching { refreshPluginSnapshots() }
+        }
+        // The plugin runtime needs a window launcher and the guest runner.
+        com.crossberry.noxs.runtime.plugins.NoxsPluginRuntime.windowLauncher =
+            { windowId, pluginId, title, width, height ->
+                mainHandler.post { openPluginWindow(windowId, pluginId, title, width, height) }
+            }
+        com.crossberry.noxs.runtime.plugins.NoxsPluginRuntime.guestRunner = { command ->
+            runBlockingGuestCommand(command)
+        }
+    }
+
+    private fun armPluginObserver(force: Boolean) {
+        val path = paths.pluginRequests.absolutePath
+        if (!force && pluginObserver != null && pluginObservedPath == path) return
+        pluginObserver?.stopWatching()
+        pluginObserver = null
+        pluginObservedPath = null
+        val requestMask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+        val invalidatedMask = FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
+        val observer = object : FileObserver(path, requestMask or invalidatedMask) {
+            override fun onEvent(event: Int, name: String?) {
+                if ((event and invalidatedMask) != 0) {
+                    mainHandler.post {
+                        pluginObserver?.stopWatching()
+                        pluginObserver = null
+                        pluginObservedPath = null
+                        runCatching { startPluginBridge() }
+                    }
+                    return
+                }
+                if (name == null || (event and requestMask) == 0) return
+                scope.launch(Dispatchers.IO) {
+                    runCatching { pluginBridge?.processPendingRequests() }
+                }
+            }
+        }
+        runCatching { observer.startWatching() }.onSuccess {
+            pluginObserver = observer
+            pluginObservedPath = path
+        }.onFailure {
+            NoxsLog.w("NoxsService", "cannot watch plugin bridge: ${it.javaClass.simpleName}")
+        }
+    }
+
+    /** Runs one plugin mutation and turns failures into stable messages. */
+    private fun handlePluginMutation(
+        block: () -> Unit?
+    ): Pair<Boolean, String> = try {
+        block()
+        scope.launch(Dispatchers.IO) { runCatching { refreshPluginSnapshots() } }
+        true to "done"
+    } catch (e: com.crossberry.noxs.runtime.plugins.NoxsPluginInstaller.InstallException) {
+        false to e.message
+    } catch (e: com.crossberry.noxs.runtime.plugins.NoxsPluginManager.ManagerException) {
+        false to e.message
+    } catch (t: Throwable) {
+        NoxsLog.w("NoxsService", "plugin mutation failed: ${t.javaClass.simpleName}")
+        false to "The request could not be completed"
+    }
+
+    /** Catalog + installed snapshots for the CLI (list/search/info). */
+    private fun refreshPluginSnapshots() {
+        val manager = pluginManager ?: return
+        val bridge = pluginBridge ?: return
+        runCatching {
+            bridge.writeSnapshots(manager.storeCards(refresh = false), manager.installed())
+        }
+    }
+
+    private fun openPluginStore() {
+        val intent = Intent(this, PluginStoreActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(intent) }
+            .onFailure { NoxsLog.w("NoxsService", "plugin store launch failed: ${it.javaClass.simpleName}") }
+    }
+
+    private fun openPluginWindow(windowId: String, pluginId: String, title: String, width: Int, height: Int) {
+        val intent = Intent(this, PluginWindowActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(PluginWindowActivity.EXTRA_WINDOW_ID, windowId)
+            .putExtra(PluginWindowActivity.EXTRA_PLUGIN_ID, pluginId)
+            .putExtra(PluginWindowActivity.EXTRA_TITLE, title)
+            .putExtra(PluginWindowActivity.EXTRA_WIDTH, width)
+            .putExtra(PluginWindowActivity.EXTRA_HEIGHT, height)
+        runCatching { startActivity(intent) }
+            .onFailure { NoxsLog.w("NoxsService", "plugin window launch failed: ${it.javaClass.simpleName}") }
+    }
+
+    /** Blocking guest command runner for noxs.terminal.exec (worker thread). */
+    private fun runBlockingGuestCommand(command: String): com.crossberry.noxs.runtime.plugins.PluginExecResult {
+        return try {
+            val argv = launcher.oneShotArgv(
+                listOf("/bin/bash", "-lc", command),
+                asRoot = false
+            )
+            val pb = ProcessBuilder(argv).redirectErrorStream(false)
+            launcher.applyEnvTo(pb)
+            val process = pb.start()
+            val stdout = process.inputStream.bufferedReader().use { it.readText() }
+            val stderr = process.errorStream.bufferedReader().use { it.readText() }
+            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (finished) {
+                com.crossberry.noxs.runtime.plugins.PluginExecResult(process.exitValue(), stdout, stderr)
+            } else {
+                process.destroyForcibly()
+                com.crossberry.noxs.runtime.plugins.PluginExecResult(124, stdout, "timeout")
+            }
+        } catch (e: Exception) {
+            NoxsLog.w("NoxsService", "plugin exec failed: ${e.javaClass.simpleName}")
+            com.crossberry.noxs.runtime.plugins.PluginExecResult(126, "", "command failed")
+        }
+    }
+
     override fun onDestroy() {
         releaseKeepAwake()
         webObserver?.stopWatching()
@@ -360,6 +517,11 @@ class NoxsService : Service() {
         envObserver?.stopWatching()
         envObserver = null
         envBridge = null
+        pluginObserver?.stopWatching()
+        pluginObserver = null
+        pluginBridge = null
+        pluginManager = null
+        com.crossberry.noxs.runtime.plugins.NoxsPluginRuntime.shutdown()
         socketServer.stop()
         sessions.closeAll()
         // The service is going away: reconcile records so the Activity Center

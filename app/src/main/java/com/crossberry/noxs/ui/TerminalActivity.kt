@@ -169,6 +169,7 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         // Drawer: managers
         val routes = mapOf(
             binding.navFiles to FileBrowserActivity::class.java,
+            binding.navPlugins to PluginStoreActivity::class.java,
             binding.navPackages to PackageManagerActivity::class.java,
             binding.navUsers to UserManagerActivity::class.java,
             binding.navActivity to ActivityCenterActivity::class.java,

@@ -143,6 +143,27 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ui.PluginStoreActivity"
+            android:exported="false"
+            android:label="@string/plugin_store_title"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.PluginDetailsActivity"
+            android:exported="false"
+            android:label="@string/plugin_details_title"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.PluginWindowActivity"
+            android:exported="false"
+            android:label="@string/title_plugin_window"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ui.PermissionCenterActivity"
             android:exported="false"
             android:label="@string/title_permission_center" />

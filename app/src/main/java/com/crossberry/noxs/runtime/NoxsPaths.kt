@@ -40,6 +40,12 @@ class NoxsPaths(baseDir: File, val nativeLibDir: File? = null) {
     val envResponses: File = File(envControl, "responses")
     val envSnapshot: File = File(envControl, "registry.txt")
     val envProvidersSnapshot: File = File(envControl, "providers.txt")
+    // Guest→Android `nx plug` bridge (Noxs Plugin Store)
+    val pluginControl: File = File(run, "plugin")
+    val pluginRequests: File = File(pluginControl, "requests")
+    val pluginResponses: File = File(pluginControl, "responses")
+    val pluginCatalogSnapshot: File = File(pluginControl, "catalog.txt")
+    val pluginInstalledSnapshot: File = File(pluginControl, "plugins.txt")
     val cache: File = File(base, NoxsConstants.ANDROID_CACHE_DIR)
     val logs: File = File(base, NoxsConstants.ANDROID_LOGS_DIR)
     val tmp: File = File(base, NoxsConstants.ANDROID_TMP_DIR)
@@ -65,11 +71,13 @@ class NoxsPaths(baseDir: File, val nativeLibDir: File? = null) {
     val rootfsNoxsRun: File get() = File(rootfs, NoxsConstants.NOXS_RUN_DIR)
     val rootfsHostRun: File get() = File(rootfs, NoxsConstants.HOST_RUN_DIR)
     val rootfsHomeNoxs: File get() = File(rootfs, NoxsConstants.DEFAULT_USER_HOME)
+    /** Plugin Store installations live inside the active environment. */
+    val rootfsPluginsDir: File get() = File(rootfsHomeNoxs, ".noxs/plugins")
     val rootfsServices: File get() = File(rootfs, NoxsConstants.NOXS_SERVICE_DIR)
     val noxsResourcesConf: File = File(rootfs, "etc/noxs/resources.conf")
 
     fun ensureBaseDirs(): Boolean =
-        listOf(base, bin, run, storageRequests, storageResponses, storagePayloads, storageResponsePayloads, webRequests, webResponses, envRequests, envResponses, cache, logs, tmp)
+        listOf(base, bin, run, storageRequests, storageResponses, storagePayloads, storageResponsePayloads, webRequests, webResponses, envRequests, envResponses, pluginRequests, pluginResponses, cache, logs, tmp)
             .all { it.isDirectory || it.mkdirs() }
 
     fun isInstalled(): Boolean = installMarker.isFile && prootBinary.isFile && rootfs.isDirectory

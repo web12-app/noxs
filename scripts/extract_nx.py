@@ -25,6 +25,7 @@ SHELL_CONSTANTS = {
     "WEB_LIB": ("NoxsNxWebTemplate.kt", "linux-runtime/nx/web-lib.sh"),
     "ENV_LIB": ("NoxsNxEnvLib.kt", "linux-runtime/nx/env-lib.sh"),
     "VPN_LIB": ("NoxsNxVpnLib.kt", "linux-runtime/nx/vpn-lib.sh"),
+    "PLUG_LIB": ("NoxsNxPlugLib.kt", "linux-runtime/nx/plug-lib.sh"),
     "AI_LIB": ("NoxsNxAiLib.kt", "linux-runtime/nx/ai-lib.sh"),
 }
 

@@ -34,6 +34,7 @@ for name, content, mirror in extract_nx.nx_shell_scripts(root):
               'PKG_INSTALL': 'noxs-pkg/pkg-install.sh', 'WEB_LIB': 'noxs-pkg/web-lib.sh',
               'ENV_LIB': 'noxs-pkg/env-lib.sh',
               'VPN_LIB': 'noxs-pkg/vpn-lib.sh',
+              'PLUG_LIB': 'noxs-pkg/plug-lib.sh',
               'AI_LIB': 'noxs-pkg/ai-lib.sh'}[name]
     target = dest / module
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -304,6 +305,46 @@ mkdir -p "$WEBHOST/requests" "$WEBHOST/responses"
     else
         pass "nx_ow_cmd rejects javascript"
     fi
+)
+
+# ---- plugin bridge: nx plug (Noxs Plugin Store) -----------------------------
+echo "=== plug-lib: id validation + snapshots ==="
+. "$NX_LIB_DIR/plug-lib.sh"
+
+PLUGHOST="$TMP/plughost"
+mkdir -p "$PLUGHOST/requests" "$PLUGHOST/responses"
+printf 'hello\tHello\t1.0.0\tUtilities\tdemo,starter\tExample Noxs plugin\tinstalled\t-\n' > "$PLUGHOST/catalog.txt"
+printf 'hello\tHello\t1.0.0\tenabled\n' > "$PLUGHOST/plugins.txt"
+(
+    export NX_PLUG_HOST="$PLUGHOST"
+    ( while [ ! -d "$PLUGHOST/done" ]; do
+          for req in "$PLUGHOST"/requests/*; do
+              [ -f "$req" ] || continue
+              id="$(basename "$req")"
+              op="$(sed -n '1p' "$req")"
+              plugin="$(sed -n '2p' "$req")"
+              case "$op" in
+                  open|install|uninstall|enable|disable|update)
+                      printf 'OK\ndone\n' > "$PLUGHOST/responses/$id" ;;
+                  *)
+                      printf 'ERR\nUnsupported plugin request\n' > "$PLUGHOST/responses/$id" ;;
+              esac
+          done
+          sleep 0.05
+      done ) &
+    RESPONDER=$!
+    OUT="$(nx_plug_cmd "" 2>&1)"
+    RC1=$?
+    mkdir -p "$PLUGHOST/done"
+    wait "$RESPONDER" 2>/dev/null
+    [ "$RC1" -eq 0 ] && pass "bare nx plug opens the store" || fail "bare nx plug opens the store"
+
+    # Snapshot-driven reads (no bridge round-trip).
+    nx_plug_cmd list | grep -q "hello" && pass "nx plug list shows installed" || fail "nx plug list shows installed"
+    nx_plug_cmd search hello | grep -q "Hello" && pass "nx plug search hello" || fail "nx plug search hello"
+    nx_plug_cmd search nomatchxyz | grep -q "No plugins found" && pass "nx plug search empty" || fail "nx plug search empty"
+    nx_plug_cmd info hello | grep -q "Example Noxs plugin" && pass "nx plug info" || fail "nx plug info"
+    if nx_plug_cmd info ghost >/dev/null 2>&1; then fail "nx plug info unknown rejected"; else pass "nx plug info unknown rejected"; fi
 )
 
 # ---- dispatcher: noxs forward + help ----------------------------------------
