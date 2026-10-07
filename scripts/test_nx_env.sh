@@ -91,7 +91,7 @@ respond() {
 run_cli() {
     # Runs the CLI for up to 20s, pumping the responder in the background.
     local out rc=0 input="$1"; shift
-    out="$(cat "$input" 2>/dev/null | timeout 20 "$NXBIN" env "$@" 2>&1)" || rc=$?
+    out="$(timeout 20 "$NXBIN" env "$@" < "$input" 2>&1)" || rc=$?
     OUT="$out"
     RC_C="$rc"
 }
