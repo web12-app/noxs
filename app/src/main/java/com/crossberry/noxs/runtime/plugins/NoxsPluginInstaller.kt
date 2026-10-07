@@ -123,7 +123,7 @@ class NoxsPluginInstaller(
         if (!staging.mkdirs()) throw InstallException("Plugin storage is not writable")
         try {
             extractArtifact(bytes, staging)
-            validateStaged(staging, entry.id)
+            validateStaged(staging, entry.id, entry.version)
             onProgress(85)
             if (target.exists()) target.deleteRecursively()
             if (!staging.renameTo(target)) {
@@ -209,8 +209,8 @@ class NoxsPluginInstaller(
         }
     }
 
-    /** The staged tree must carry a valid plugin.json + the runtime entry. */
-    private fun validateStaged(staged: File, expectedId: String) {
+    /** The staged tree must carry a valid plugin.json matching the registry. */
+    private fun validateStaged(staged: File, expectedId: String, expectedVersion: String) {
         val metaFile = File(staged, META_NAME)
         if (!metaFile.isFile) throw InstallException("The plugin package has no plugin.json")
         val meta = try {
@@ -222,6 +222,11 @@ class NoxsPluginInstaller(
             throw InstallException("The plugin package has invalid metadata")
         }
         if (meta.id != expectedId) {
+            throw InstallException("The plugin package does not match its registry entry")
+        }
+        // A package whose version differs from the registry (stale or
+        // tampered artifact) must not silently install as a different release.
+        if (meta.version != expectedVersion) {
             throw InstallException("The plugin package does not match its registry entry")
         }
         if (!File(staged, PluginJson.RUNTIME_ENTRY).isFile) {

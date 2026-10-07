@@ -46,8 +46,10 @@ object PluginReadmeRenderer {
                 }
                 headingLevel(line) in 1..6 -> {
                     val level = headingLevel(line)
+                    // Strip exactly `level` leading '#'s (substringAfter would
+                    // leave one behind for h2-h6).
                     out.append("<h").append(level).append('>')
-                        .append(inline(line.substringAfter('#', "").trim()))
+                        .append(inline(line.trimStart().substring(level).trim()))
                         .append("</h").append(level).append(">\n")
                     index++
                 }

@@ -73,9 +73,9 @@ class NoxsPluginInstallerTest {
         return gz.toByteArray()
     }
 
-    private fun fakeTarBytes(): ByteArray {
+    private fun fakeTarBytes(version: String = "1.0.0"): ByteArray {
         val pluginJson = """
-            {"id":"hello","name":"Hello","version":"1.0.0",
+            {"id":"hello","name":"Hello","version":"$version",
              "description":"Example Noxs plugin","main":"plugin.js",
              "permissions":["ui"],"minimumNoxsVersion":"0.11.0"}
         """.trimIndent().toByteArray()
@@ -97,17 +97,22 @@ class NoxsPluginInstallerTest {
             releaseTag = null, updatedAt = null
         )
 
-    private class FakeFetcher(private val bytes: ByteArray) : NoxsPluginRegistry.Fetcher {
+    /** Serves queued payloads in order (one per fetch). */
+    private class FakeFetcher(vararg payloads: ByteArray) : NoxsPluginRegistry.Fetcher {
+        private val queue = ArrayDeque(payloads.toList())
         override fun get(url: String, timeoutMs: Int): ByteArray {
             if (!url.startsWith("https://")) throw AssertionError("non-https fetch attempted")
-            return bytes
+            return queue.removeFirstOrNull() ?: throw AssertionError("unexpected extra fetch")
         }
     }
 
-    private fun installer(artifact: ByteArray = fakeTarBytes()): Pair<NoxsPluginInstaller, File> {
+    private fun installer(
+        vararg artifacts: ByteArray
+    ): Pair<NoxsPluginInstaller, File> {
         val home = tmp.newFolder()
         val root = File(home, ".noxs/plugins")
-        return NoxsPluginInstaller(root, "0.11.0", FakeFetcher(artifact)) to root
+        val payloads = if (artifacts.isEmpty()) arrayOf(fakeTarBytes()) else artifacts
+        return NoxsPluginInstaller(root, "0.11.0", FakeFetcher(*payloads)) to root
     }
 
     // --------------------------------------------------------------- tests
@@ -146,6 +151,20 @@ class NoxsPluginInstallerTest {
         val checksum = PluginChecksum.sha256(fakeTarBytes())
         installer.install(entry(checksum = checksum))
         assertEquals(listOf("hello"), installer.listInstalled().map { it.meta.id })
+    }
+
+    @Test
+    fun `version mismatch between archive and registry is refused`() {
+        // The registry says 1.2.0 but the packaged plugin.json says 1.0.0.
+        val (installer, root) = installer(fakeTarBytes(version = "1.0.0"))
+        val error = try {
+            installer.install(entry(checksum = null).copy(version = "1.2.0", artifact = "https://a/x"))
+            null
+        } catch (e: NoxsPluginInstaller.InstallException) {
+            e
+        }
+        assertNotNull(error)
+        assertFalse(File(root, "hello").exists())
     }
 
     @Test
@@ -245,7 +264,8 @@ class NoxsPluginInstallerTest {
 
     @Test
     fun `update detection and preserved disabled state`() {
-        val (installer, _) = installer()
+        // First fetch serves the 1.0.0 artifact, the update fetch the 1.1.0 one.
+        val (installer, _) = installer(fakeTarBytes("1.0.0"), fakeTarBytes("1.1.0"))
         installer.install(entry())
         val current = installer.installed("hello")!!
         val same = entry().copy(version = "1.0.0")
