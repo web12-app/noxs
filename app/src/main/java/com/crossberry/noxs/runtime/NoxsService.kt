@@ -377,7 +377,8 @@ class NoxsService : Service() {
             cacheDir = app.cacheDir,
             appVersion = runCatching {
                 packageManager.getPackageInfo(packageName, 0).versionName
-            }.getOrNull() ?: "0.0.0"
+            }.getOrNull() ?: "0.0.0",
+            guestBinDir = java.io.File(paths.rootfs, "usr/local/bin")
         )
         pluginManager = manager
         val bridge = com.crossberry.noxs.runtime.plugins.NoxsPluginBridge(paths)

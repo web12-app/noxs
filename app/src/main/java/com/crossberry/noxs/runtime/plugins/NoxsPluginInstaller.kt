@@ -14,7 +14,16 @@
  *
  * Storage layout (inside the active rootfs):
  *   /home/noxs/.noxs/plugins/<id>/plugin.js|plugin.json|README.md|icon.svg
- *   /home/noxs/.noxs/plugins/<id>/.disabled        (when disabled)
+ *   /home/noxs/.noxs/plugins/<id>/bin/...            (guest command scripts)
+ *   /home/noxs/.noxs/plugins/<id>/.disabled          (when disabled)
+ *   /home/noxs/.noxs/plugins/<id>/.bin-manifest      (installed command names)
+ *
+ * Guest command scripts (bin/ inside the artifact) are installed into the
+ * guest /usr/local/bin when the plugin declares the terminal permission —
+ * `bin/code`, for example, becomes a real `code` command runnable from any
+ * path, in the caller's own shell. Every shim carries a Noxs ownership
+ * marker; uninstall/disable removes exactly the files this plugin installed
+ * and never touches foreign files.
  *
  * A broken plugin can never crash Noxs: every failure surfaces as a
  * short, stable InstallException message — no stack traces reach users.
@@ -31,7 +40,8 @@ import java.util.zip.GZIPInputStream
 class NoxsPluginInstaller(
     private val pluginsRoot: File,
     private val appVersion: String,
-    private val fetcher: NoxsPluginRegistry.Fetcher = HttpsFetcher()
+    private val fetcher: NoxsPluginRegistry.Fetcher = HttpsFetcher(),
+    private val guestBinDir: File? = null
 ) {
 
     class InstallException(message: String) : Exception(message)
@@ -125,7 +135,11 @@ class NoxsPluginInstaller(
             extractArtifact(bytes, staging)
             validateStaged(staging, entry.id, entry.version)
             onProgress(85)
-            if (target.exists()) target.deleteRecursively()
+            if (target.exists()) {
+                // Refresh ownership first so an update cannot leak stale shims.
+                removeCommandShims(target)
+                target.deleteRecursively()
+            }
             if (!staging.renameTo(target)) {
                 staging.copyRecursively(target, overwrite = true)
                 staging.deleteRecursively()
@@ -138,6 +152,7 @@ class NoxsPluginInstaller(
         } finally {
             if (staging.exists()) staging.deleteRecursively()
         }
+        syncCommandShims(target)
         onProgress(100)
         installed(entry.id) ?: throw InstallException("The plugin could not be registered")
     }
@@ -157,17 +172,22 @@ class NoxsPluginInstaller(
         if (!PluginJson.validId(id)) throw InstallException("Invalid plugin id")
         val dir = pluginsDir(id)
         if (!dir.isDirectory) throw InstallException("Plugin is not installed")
+        removeCommandShims(dir)
         if (!dir.deleteRecursively()) {
             NoxsLog.w("PluginInstaller", "partial uninstall of $id")
         }
     }
 
     fun enable(id: String) {
-        File(requireInstalledDir(id), DISABLED_MARKER).delete()
+        val dir = requireInstalledDir(id)
+        File(dir, DISABLED_MARKER).delete()
+        syncCommandShims(dir)
     }
 
     fun disable(id: String) {
-        File(requireInstalledDir(id), DISABLED_MARKER).writeText("disabled\n", Charsets.UTF_8)
+        val dir = requireInstalledDir(id)
+        File(dir, DISABLED_MARKER).writeText("disabled\n", Charsets.UTF_8)
+        removeCommandShims(dir)
     }
 
     private fun requireInstalledDir(id: String): File {
@@ -177,6 +197,131 @@ class NoxsPluginInstaller(
             throw InstallException("Plugin is not installed")
         }
         return dir
+    }
+
+    // ------------------------------------------------- guest command shims
+
+    /**
+     * Installs the plugin's guest command scripts (bin/) into the guest
+     * /usr/local/bin so `bin/<name>` becomes a real terminal command —
+     * available from any path, in the caller's own interactive shell.
+     *
+     * Security rules:
+     *  - only plugins granted the terminal permission get commands
+     *  - names must satisfy the plugin id grammar (no traversal, no dots)
+     *  - scripts must start with a "#!" shebang and stay under [MAX_SHIM_BYTES]
+     *  - an existing file that is not owned by THIS plugin is never replaced
+     *  - every written shim carries an ownership marker line, and the exact
+     *    set of installed names is recorded in the plugin's .bin-manifest
+     *
+     * Failures degrade to log lines — a shim problem never fails an install.
+     */
+    private fun syncCommandShims(dir: File) {
+        val binDir = guestBinDir ?: return
+        val meta = runCatching { PluginJson.parseMetaFile(File(dir, META_NAME)) }.getOrNull()
+            ?: return
+        val installed = mutableListOf<String>()
+        val bin = File(dir, BIN_DIR)
+        if (PluginPermissions.TERMINAL in meta.permissions && bin.isDirectory) {
+            bin.listFiles().orEmpty().filter { it.isFile }.forEach { script ->
+                installShim(dir.name, script, binDir)?.let { installed += it }
+            }
+        } else if (bin.isDirectory) {
+            NoxsLog.w(TAG, "plugin ${meta.id} ships bin/ without the terminal permission — commands not installed")
+        }
+        // Drop commands that the current version no longer ships.
+        previousShims(dir).forEach { name ->
+            if (name in installed) return@forEach
+            val dest = File(binDir, name)
+            if (ownedBy(dest, dir.name)) {
+                runCatching { dest.delete() }
+            }
+        }
+        val manifest = File(dir, BIN_MANIFEST)
+        if (installed.isEmpty()) {
+            manifest.delete()
+        } else {
+            runCatching {
+                manifest.writeText(installed.sorted().joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+            }
+        }
+    }
+
+    /** Installs one script as a guest command; returns the command name or null. */
+    private fun installShim(pluginId: String, script: File, binDir: File): String? {
+        val name = script.name
+        if (!PluginJson.validId(name)) {
+            NoxsLog.w(TAG, "bin: refusing invalid command name for $pluginId: $name")
+            return null
+        }
+        val bytes = runCatching { script.readBytes() }.getOrNull() ?: return null
+        if (bytes.size > MAX_SHIM_BYTES) {
+            NoxsLog.w(TAG, "bin: $name is too large (${bytes.size} bytes), skipped")
+            return null
+        }
+        if (bytes.size < 2 || bytes[0] != '#'.code.toByte() || bytes[1] != '!'.code.toByte()) {
+            NoxsLog.w(TAG, "bin: $name has no shebang, skipped")
+            return null
+        }
+        val dest = File(binDir, name)
+        if (dest.exists() && !ownedBy(dest, pluginId)) {
+            NoxsLog.w(TAG, "bin: command '$name' already exists and is not owned by $pluginId, skipped")
+            return null
+        }
+        return runCatching {
+            if (!binDir.isDirectory) binDir.mkdirs()
+            val text = String(bytes, Charsets.UTF_8)
+            val marked = markShim(pluginId, text)
+            dest.writeText(marked, Charsets.UTF_8)
+            dest.setReadable(true, false)
+            dest.setExecutable(true, false)
+            name
+        }.getOrElse {
+            NoxsLog.w(TAG, "bin: could not install command '$name'")
+            null
+        }
+    }
+
+    /**
+     * The shebang must stay the first line for the kernel, so the ownership
+     * marker is inserted directly below it (or appended when absent — the
+     * validator already rejects shebang-less scripts).
+     */
+    private fun markShim(pluginId: String, text: String): String {
+        val marker = markerLine(pluginId)
+        val firstNewline = text.indexOf('\n')
+        return if (firstNewline >= 0) {
+            text.substring(0, firstNewline + 1) + marker + "\n" + text.substring(firstNewline + 1)
+        } else {
+            text + "\n" + marker + "\n"
+        }
+    }
+
+    private fun markerLine(pluginId: String): String = "# Noxs plugin command shim ($pluginId) — installed by the Noxs Plugin Store"
+
+    /** True when [file] starts with THIS plugin's ownership marker. */
+    private fun ownedBy(file: File, pluginId: String): Boolean = runCatching {
+        file.useLines(Charsets.UTF_8) { lines ->
+            lines.take(4).any { it.startsWith("# Noxs plugin command shim (") && it.contains("($pluginId)") }
+        }
+    }.getOrDefault(false)
+
+    private fun previousShims(dir: File): List<String> = runCatching {
+        File(dir, BIN_MANIFEST).readLines(Charsets.UTF_8)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && PluginJson.validId(it) }
+    }.getOrDefault(emptyList())
+
+    private fun removeCommandShims(dir: File) {
+        val binDir = guestBinDir ?: return
+        previousShims(dir).forEach { name ->
+            val dest = File(binDir, name)
+            if (dest.isFile && ownedBy(dest, dir.name)) {
+                runCatching { dest.delete() }
+                    .onFailure { NoxsLog.w(TAG, "bin: could not remove command '$name'") }
+            }
+        }
+        runCatching { File(dir, BIN_MANIFEST).delete() }
     }
 
     // ------------------------------------------------------------ internals
@@ -235,10 +380,14 @@ class NoxsPluginInstaller(
     }
 
     companion object {
+        private const val TAG = "PluginInstaller"
         const val DISABLED_MARKER = ".disabled"
         const val META_NAME = "plugin.json"
         const val PAYLOAD_NAME = ".payload.tar"
+        const val BIN_DIR = "bin"
+        const val BIN_MANIFEST = ".bin-manifest"
         const val ARTIFACT_TIMEOUT_MS = 60_000
         const val MAX_ARTIFACT_BYTES = 32L * 1024L * 1024L
+        const val MAX_SHIM_BYTES = 128 * 1024
     }
 }

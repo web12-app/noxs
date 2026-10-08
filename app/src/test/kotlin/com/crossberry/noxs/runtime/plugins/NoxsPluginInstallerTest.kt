@@ -106,13 +106,44 @@ class NoxsPluginInstallerTest {
         }
     }
 
+    /** Fixture mirroring the Code plugin: terminal permission + bin/code. */
+    private fun codeTarBytes(version: String = "1.0.0", withBin: Boolean = true): ByteArray {
+        val pluginJson = """
+            {"id":"code","name":"Code","version":"$version",
+             "description":"Open files with Spck Editor","main":"plugin.js",
+             "permissions":["ui","terminal","network"],"minimumNoxsVersion":"0.12.0"}
+        """.trimIndent().toByteArray()
+        val entries = mutableListOf(
+            tarEntry("plugin.js", "globalThis.__NOXS_PLUGIN__={};".toByteArray()),
+            tarEntry("plugin.json", pluginJson),
+            tarEntry("README.md", "# Code".toByteArray()),
+            tarEntry("icon.svg", "<svg/>".toByteArray())
+        )
+        if (withBin) {
+            entries += tarEntry("bin/code", "#!/bin/sh\necho from-spck\n".toByteArray())
+        }
+        return gzip(*entries.toTypedArray())
+    }
+
+    private fun codeEntry(version: String = "1.0.0") = RegistryEntry(
+        id = "code", name = "Code", version = version,
+        description = "Open files with Spck Editor", logo = "icon.svg", readme = "README.md",
+        logoUrl = null, readmeUrl = null, release = version,
+        permissions = listOf("ui", "terminal", "network"), category = "Developer Tools",
+        keywords = emptyList(), minimumNoxsVersion = "0.12.0",
+        artifact = "https://artifacts.invalid/code.noxs-plugin", checksum = null,
+        releaseTag = null, updatedAt = null
+    )
+
     private fun installer(
-        vararg artifacts: ByteArray
+        vararg artifacts: ByteArray,
+        binDir: File? = null,
+        appVersion: String = "0.11.0"
     ): Pair<NoxsPluginInstaller, File> {
         val home = tmp.newFolder()
         val root = File(home, ".noxs/plugins")
         val payloads = if (artifacts.isEmpty()) arrayOf(fakeTarBytes()) else artifacts
-        return NoxsPluginInstaller(root, "0.11.0", FakeFetcher(*payloads)) to root
+        return NoxsPluginInstaller(root, appVersion, FakeFetcher(*payloads), binDir) to root
     }
 
     // --------------------------------------------------------------- tests
@@ -290,5 +321,95 @@ class NoxsPluginInstallerTest {
             e
         }
         assertNotNull(error)
+    }
+
+    // ------------------------------------------------- guest command shims
+
+    @Test
+    fun `terminal plugin installs its bin script as a guest command`() {
+        val bin = tmp.newFolder("guest-bin")
+        val (installer, root) = installer(codeTarBytes(), binDir = bin, appVersion = "0.12.0")
+        installer.install(codeEntry())
+        val shim = File(bin, "code")
+        assertTrue(shim.isFile)
+        assertTrue(shim.canExecute())
+        val text = shim.readText()
+        assertTrue(text.startsWith("#!/bin/sh"))
+        assertTrue(text.contains("# Noxs plugin command shim (code)"))
+        assertEquals(
+            listOf("code"),
+            File(root, "code/.bin-manifest").readLines().filter { it.isNotBlank() }
+        )
+    }
+
+    @Test
+    fun `bin scripts are skipped without the terminal permission`() {
+        val bin = tmp.newFolder("guest-bin-ui")
+        val (installer, _) = installer(codeTarBytes(), binDir = bin, appVersion = "0.12.0")
+        installer.install(codeEntry().copy(permissions = listOf("ui")))
+        assertFalse(File(bin, "code").exists())
+    }
+
+    @Test
+    fun `bin script without shebang is not installed`() {
+        val bin = tmp.newFolder("guest-bin-noshebang")
+        val tar = gzip(
+            tarEntry("plugin.js", "x".toByteArray()),
+            tarEntry(
+                "plugin.json",
+                """{"id":"code","name":"Code","version":"1.0.0","description":"d","main":"plugin.js","permissions":["ui","terminal"],"minimumNoxsVersion":"0.12.0"}""".toByteArray()
+            ),
+            tarEntry("README.md", "# Code".toByteArray()),
+            tarEntry("bin/code", "echo no shebang\n".toByteArray())
+        )
+        val (installer, _) = installer(tar, binDir = bin, appVersion = "0.12.0")
+        installer.install(codeEntry())
+        assertFalse(File(bin, "code").exists())
+    }
+
+    @Test
+    fun `uninstall removes the guest command`() {
+        val bin = tmp.newFolder("guest-bin-rm")
+        val (installer, _) = installer(codeTarBytes(), binDir = bin, appVersion = "0.12.0")
+        installer.install(codeEntry())
+        assertTrue(File(bin, "code").isFile)
+        installer.uninstall("code")
+        assertFalse(File(bin, "code").exists())
+    }
+
+    @Test
+    fun `disable removes and enable restores guest commands`() {
+        val bin = tmp.newFolder("guest-bin-toggle")
+        val (installer, _) = installer(codeTarBytes(), binDir = bin, appVersion = "0.12.0")
+        installer.install(codeEntry())
+        installer.disable("code")
+        assertFalse(File(bin, "code").exists())
+        installer.enable("code")
+        assertTrue(File(bin, "code").isFile)
+    }
+
+    @Test
+    fun `guest commands never clobber foreign files`() {
+        val bin = tmp.newFolder("guest-bin-foreign")
+        val foreign = "#!/bin/sh\necho mine\n"
+        File(bin, "code").writeText(foreign)
+        val (installer, root) = installer(codeTarBytes(), binDir = bin, appVersion = "0.12.0")
+        installer.install(codeEntry())
+        assertEquals(foreign, File(bin, "code").readText())
+        // A skipped command is not tracked as installed either.
+        assertFalse(File(root, "code/.bin-manifest").exists())
+    }
+
+    @Test
+    fun `update refreshes the guest command set`() {
+        val bin = tmp.newFolder("guest-bin-update")
+        val (installer, _) = installer(
+            codeTarBytes("1.0.0"), codeTarBytes("1.1.0", withBin = false),
+            binDir = bin, appVersion = "0.12.0"
+        )
+        installer.install(codeEntry("1.0.0"))
+        assertTrue(File(bin, "code").isFile)
+        installer.update(codeEntry("1.1.0"), installer.installed("code")!!)
+        assertFalse(File(bin, "code").exists())
     }
 }

@@ -311,10 +311,12 @@ class PluginStoreActivity : AppCompatActivity() {
 
     private fun pluginManager(): NoxsPluginManager? = runCatching {
         val app = application as com.crossberry.noxs.NoxsApplication
+        val paths = app.environments.activePaths()
         NoxsPluginManager(
-            rootfsHome = app.environments.activePaths().rootfsHomeNoxs,
+            rootfsHome = paths.rootfsHomeNoxs,
             cacheDir = app.cacheDir,
-            appVersion = appVersion()
+            appVersion = appVersion(),
+            guestBinDir = java.io.File(paths.rootfs, "usr/local/bin")
         )
     }.onFailure {
         com.crossberry.noxs.shared.NoxsLog.w("PluginStore", "manager unavailable: ${it.javaClass.simpleName}")

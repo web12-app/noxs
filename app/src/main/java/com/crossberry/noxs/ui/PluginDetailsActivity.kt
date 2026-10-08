@@ -71,12 +71,14 @@ class PluginDetailsActivity : AppCompatActivity() {
         }
         manager = runCatching {
             val app = application as com.crossberry.noxs.NoxsApplication
+            val paths = app.environments.activePaths()
             NoxsPluginManager(
-                rootfsHome = app.environments.activePaths().rootfsHomeNoxs,
+                rootfsHome = paths.rootfsHomeNoxs,
                 cacheDir = app.cacheDir,
                 appVersion = runCatching {
                     packageManager.getPackageInfo(packageName, 0).versionName
-                }.getOrNull() ?: "0.0.0"
+                }.getOrNull() ?: "0.0.0",
+                guestBinDir = java.io.File(paths.rootfs, "usr/local/bin")
             )
         }.getOrNull()
         buildUi()

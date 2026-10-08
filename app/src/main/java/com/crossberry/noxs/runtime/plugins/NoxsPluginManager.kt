@@ -17,11 +17,12 @@ class NoxsPluginManager(
     private val rootfsHome: File,
     cacheDir: File,
     private val appVersion: String,
-    fetcher: NoxsPluginRegistry.Fetcher = HttpsFetcher()
+    fetcher: NoxsPluginRegistry.Fetcher = HttpsFetcher(),
+    guestBinDir: File? = null
 ) {
 
     val registry = NoxsPluginRegistry(File(cacheDir, "plugins"), fetcher)
-    val installer = NoxsPluginInstaller(File(rootfsHome, PLUGINS_DIR), appVersion, fetcher)
+    val installer = NoxsPluginInstaller(File(rootfsHome, PLUGINS_DIR), appVersion, fetcher, guestBinDir)
 
     class ManagerException(message: String) : Exception(message)
 
