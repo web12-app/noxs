@@ -345,7 +345,19 @@ class NoxsPluginInstallerTest {
     @Test
     fun `bin scripts are skipped without the terminal permission`() {
         val bin = tmp.newFolder("guest-bin-ui")
-        val (installer, _) = installer(codeTarBytes(), binDir = bin, appVersion = "0.12.0")
+        // The INSTALLED plugin.json is the permission source of truth — the
+        // package itself must declare no terminal permission for the gate to
+        // apply (the registry entry cannot revoke packaged grants).
+        val tar = gzip(
+            tarEntry("plugin.js", "x".toByteArray()),
+            tarEntry(
+                "plugin.json",
+                """{"id":"code","name":"Code","version":"1.0.0","description":"d","main":"plugin.js","permissions":["ui"],"minimumNoxsVersion":"0.12.0"}""".toByteArray()
+            ),
+            tarEntry("README.md", "# Code".toByteArray()),
+            tarEntry("bin/code", "#!/bin/sh\necho hi\n".toByteArray())
+        )
+        val (installer, _) = installer(tar, binDir = bin, appVersion = "0.12.0")
         installer.install(codeEntry().copy(permissions = listOf("ui")))
         assertFalse(File(bin, "code").exists())
     }
