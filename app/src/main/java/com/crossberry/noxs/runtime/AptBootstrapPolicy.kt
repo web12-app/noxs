@@ -27,20 +27,28 @@ object AptRetryPolicy {
      * A stable signature of a failure: normalized error lines of the captured
      * output (or "timeout"/the exit code when nothing was captured). Two
      * attempts with the same signature mean the same failure happened again.
+     * The filter keeps apt/dpkg error prefixes AND the indented detail lines
+     * that carry the real reason ("Temporary failure resolving 'host'", ...).
      */
     fun failureSignature(output: String, exitCode: Int, timedOut: Boolean): String {
         if (timedOut) return "timeout"
         val errorLines = output.lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .filter { it.startsWith("E:") || it.startsWith("Err:") || it.startsWith("W:") ||
-                it.startsWith("error", ignoreCase = true) || it.startsWith("failed", ignoreCase = true) }
+            .filter { ERROR_HINT.containsMatchIn(it) }
             .take(4)
             .toList()
         if (errorLines.isNotEmpty()) return errorLines.joinToString("\n")
         val anyLines = output.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.take(2).toList()
         return if (anyLines.isNotEmpty()) anyLines.joinToString("\n") else "exit $exitCode"
     }
+
+    /** High-signal failure lines: apt/dpkg prefixes and their indented reasons. */
+    private val ERROR_HINT = Regex(
+        "(?i)(^E:|^Err:|^W:|temporary failure|could not resolve|unable to locate|" +
+            "has no installation candidate|connection refused|failed to fetch|" +
+            "certificate verification|is not signed|dpkg: error)"
+    )
 }
 
 /**
@@ -160,7 +168,7 @@ object AptBootstrapCommands {
 
     fun packageInstalledCommand(vararg packages: String): List<String> = listOf(
         "/bin/bash", "-c",
-        packages.joinToString(" && ") { "/usr/bin/dpkg -s $it | /bin/grep -q '^Status: install ok installed$'" }
+        packages.joinToString(" && ") { "/usr/bin/dpkg -s $it | /bin/grep -q '^Status: install ok installed\$'" }
     )
 
     fun bundleCheckCommand(): List<String> = listOf(

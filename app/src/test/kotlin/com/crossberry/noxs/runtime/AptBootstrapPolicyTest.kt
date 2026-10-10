@@ -98,7 +98,11 @@ class AptRetryLoopTest {
                 executions++
                 FakeAttempt(
                     failed = true,
-                    signature = if (executions == 1) "E: could not resolve host" else "E: connection refused"
+                    signature = when (executions) {
+                        1 -> "E: could not resolve host"
+                        2 -> "E: connection refused"
+                        else -> "E: Unable to locate package"
+                    }
                 )
             }
         )
@@ -215,10 +219,11 @@ class ConnectivityCheckTest {
     fun `dns probe command pins the getent based probe`() {
         val argv = AptBootstrapCommands.dnsProbeCommand()
         assertEquals("/bin/bash", argv[0])
-        assertTrue(argv[1].contains("getent ahostsv4"))
-        assertTrue(argv[1].contains("deb.debian.org"))
-        assertTrue(argv[1].contains("security.debian.org"))
-        assertTrue(argv[1].contains("OK ") && argv[1].contains("FAIL "))
+        assertEquals("-c", argv[1])
+        assertTrue(argv[2].contains("getent ahostsv4"))
+        assertTrue(argv[2].contains("deb.debian.org"))
+        assertTrue(argv[2].contains("security.debian.org"))
+        assertTrue(argv[2].contains("OK ") && argv[2].contains("FAIL "))
     }
 }
 
@@ -270,7 +275,9 @@ class AptBootstrapCommandsTest {
         val argv = AptBootstrapCommands.packageInstalledCommand("ca-certificates", "debian-archive-keyring")
         assertTrue(argv[2].contains("/usr/bin/dpkg -s ca-certificates"))
         assertTrue(argv[2].contains("/usr/bin/dpkg -s debian-archive-keyring"))
-        assertTrue(argv[2].contains("'Status: install ok installed$'"))
+        // The status line is anchored with an escaped literal dollar (Kotlin
+        // \$ escape) so the grep pattern reaches the shell intact.
+        assertTrue(argv[2].contains("grep -q '^Status: install ok installed\$'"))
     }
 
     @Test
