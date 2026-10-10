@@ -2,6 +2,19 @@
  * Noxs — signed Debian APT bootstrap.
  * Installs/repairs CA certificates over signed Debian HTTP metadata first,
  * then switches the sole source file to HTTPS and verifies a real TLS update.
+ *
+ * Reliability rules implemented here (see the setup-repair task spec):
+ *  - DNS and repository reachability are probed BEFORE any apt run, so a
+ *    broken network surfaces as one clear message instead of minutes of
+ *    generic apt resolver errors.
+ *  - Network steps run with bounded retries (3 attempts, 3 s/6 s backoff).
+ *    Two consecutive IDENTICAL failures abort the retries — repeating the
+ *    same command against the same error cannot succeed.
+ *  - Every command captures stdout+stderr, the real exit code and its wall
+ *    duration; failures are never suppressed and always reach the console.
+ *  - A running spinner is never treated as progress: the only success proof
+ *    is a verified command result (exit code + package/bundle state).
+ *  - Already-verified packages are not reinstalled again on repair runs.
  */
 package com.crossberry.noxs.runtime
 
@@ -60,25 +73,44 @@ class NoxsAptBootstrapper(
                 if (!requireSuccessful("dpkg filesystem compatibility check", linkProbe, onLog)) {
                     return@synchronized Result(false, summarize("dpkg filesystem compatibility check", linkProbe))
                 }
-                NoxsLog.i("AptBootstrap", "PRoot dpkg filesystem compatibility check passed")
+                NoxsLog.i(TAG, "PRoot dpkg filesystem compatibility check passed")
 
+                // 1 — repositories: DNS + reachability pre-flight.
+                onLog("Checking repositories")
+                val dnsProbe = run(AptBootstrapCommands.dnsProbeCommand(), 30)
+                val dnsOutcome = ConnectivityCheck.parse(dnsProbe.output)
+                val dnsUsable = dnsOutcome.success && dnsOutcome.okHosts.isNotEmpty()
+                if (!dnsUsable || dnsProbe.timedOut) {
+                    val reason = if (dnsProbe.timedOut) {
+                        "repository DNS probe timed out after ${dnsProbe.durationMs / 1000}s"
+                    } else ConnectivityCheck.describe(dnsOutcome)
+                    onLog("Checking repositories: $reason")
+                    NoxsLog.e(TAG, "repository pre-flight failed: $reason")
+                    return@synchronized Result(false, "Checking repositories failed: $reason")
+                }
+                NoxsLog.i(TAG, "repository pre-flight ok (${dnsOutcome.okHosts.joinToString()}) in ${dnsProbe.durationMs} ms")
+
+                // 2 — interrupted dpkg configuration (detected, repaired only
+                // once authenticated package metadata is available below).
                 onLog("Checking for interrupted dpkg configuration")
-                val auditBefore = run(listOf("/usr/bin/dpkg", "--audit"), 60)
+                val auditBefore = run(AptBootstrapCommands.dpkgAuditCommand(), 60)
                 if (auditBefore.output.isNotBlank()) onLog("dpkg audit found incomplete package state")
-                val initialDpkg = run(listOf("/usr/bin/dpkg", "--configure", "-a"), 180)
+                val initialDpkg = run(AptBootstrapCommands.dpkgConfigureCommand(), 180)
                 reportOutput("dpkg preflight", initialDpkg, onLog)
                 if (initialDpkg.timedOut) return@synchronized failure("dpkg preflight timed out", initialDpkg, onLog)
-                val interruptedConfiguration = initialDpkg.exitCode != 0 || auditBefore.output.isNotBlank()
+                val interruptedConfiguration = DpkgState.isInterrupted(auditBefore.output, initialDpkg.exitCode)
                 if (interruptedConfiguration) {
                     onLog("dpkg has pending configuration; will repair after signed package metadata is available")
                 }
 
-                // APT's normal Release-file signature checks remain enabled.
+                // 3 — signed HTTP metadata (bounded retries: network step).
                 onLog("Refreshing signed Debian package metadata over HTTP")
-                val httpUpdate = run(aptCommand("update"), 240)
+                val httpUpdate = runWithRetry("signed HTTP apt update", aptCommand("update"), 240, onLog)
                 if (!requireSuccessful("signed HTTP apt update", httpUpdate, onLog)) {
                     return@synchronized Result(false, summarize("signed HTTP apt update", httpUpdate))
                 }
+                NoxsLog.i(TAG, "HTTP apt update ok in ${httpUpdate.durationMs} ms")
+
                 if (interruptedConfiguration) {
                     onLog("Repairing interrupted package dependencies from authenticated Debian repositories")
                     val dependencyRepair = run(
@@ -89,30 +121,47 @@ class NoxsAptBootstrapper(
                         return@synchronized Result(false, summarize("apt dependency repair", dependencyRepair))
                     }
                     RootfsConfigurator.repairDpkgPermissions(paths)
-                    val configured = run(listOf("/usr/bin/dpkg", "--configure", "-a"), 240)
+                    val configured = run(AptBootstrapCommands.dpkgConfigureCommand(), 240)
                     if (!requireSuccessful("dpkg recovery", configured, onLog)) {
                         return@synchronized Result(false, summarize("dpkg recovery", configured))
                     }
                 }
 
-                onLog("Installing or repairing ca-certificates and the Debian archive keyring")
-                val certInstall = run(
-                    aptCommand("install", "--yes", "--no-install-recommends", "--reinstall", "ca-certificates", "debian-archive-keyring"),
-                    300
+                // 4 — CA certificates. On repair runs where both packages are
+                // already installed and verified, the (slow, repeated) apt
+                // installation is skipped and only the bundle is refreshed.
+                val packagesInstalled = run(
+                    AptBootstrapCommands.packageInstalledCommand("ca-certificates", "debian-archive-keyring"), 30
                 )
-                if (!requireSuccessful("certificate package installation", certInstall, onLog)) {
-                    return@synchronized Result(false, summarize("certificate package installation", certInstall))
+                val alreadyVerified = !packagesInstalled.failed && packagesInstalled.output.isBlank()
+                if (alreadyVerified) {
+                    onLog("ca-certificates and the archive keyring are already installed — refreshing the bundle")
+                    NoxsLog.i(TAG, "certificate packages already installed; skipping redundant reinstall")
+                } else {
+                    onLog("Installing ca-certificates and the Debian archive keyring")
+                    val certInstall = runWithRetry(
+                        "certificate package installation",
+                        aptCommand("install", "--yes", "--no-install-recommends", "--reinstall",
+                            "ca-certificates", "debian-archive-keyring"),
+                        300, onLog
+                    )
+                    if (!requireSuccessful("certificate package installation", certInstall, onLog)) {
+                        return@synchronized Result(false, summarize("certificate package installation", certInstall))
+                    }
+                    NoxsLog.i(TAG, "certificate packages installed in ${certInstall.durationMs} ms")
                 }
 
-                val updateCertificates = run(listOf("/usr/sbin/update-ca-certificates", "--fresh"), 120)
+                // 5 — regenerate the system CA bundle and really verify it.
+                onLog("Updating certificate bundle")
+                val updateCertificates = run(listOf("/usr/sbin/update-ca-certificates", "--fresh"), 240)
                 if (!requireSuccessful("update-ca-certificates", updateCertificates, onLog)) {
                     return@synchronized Result(false, summarize("update-ca-certificates", updateCertificates))
                 }
-                val certificateCheck = run(
-                    listOf("/bin/bash", "-c", "test -s /etc/ssl/certs/ca-certificates.crt && grep -q 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt"),
-                    30
-                )
-                if (certificateCheck.exitCode != 0 || certificateCheck.timedOut) {
+                NoxsLog.i(TAG, "update-ca-certificates --fresh ok in ${updateCertificates.durationMs} ms")
+
+                onLog("Verifying certificates")
+                val certificateCheck = run(AptBootstrapCommands.bundleCheckCommand(), 30)
+                if (certificateCheck.failed) {
                     return@synchronized failure("verified CA bundle is missing or empty", certificateCheck, onLog)
                 }
                 onLog("Verified the generated CA certificate bundle")
@@ -120,15 +169,16 @@ class NoxsAptBootstrapper(
                 // HTTPS is enabled only after the CA bundle exists.
                 RootfsConfigurator.configureAptSources(paths, useHttps = true)
                 onLog("Refreshing signed Debian package metadata over validated HTTPS")
-                val httpsUpdate = run(aptCommand("update"), 240)
+                val httpsUpdate = runWithRetry("HTTPS apt update", aptCommand("update"), 240, onLog)
                 if (!requireSuccessful("HTTPS apt update", httpsUpdate, onLog)) {
                     return@synchronized Result(false, summarize("HTTPS apt update", httpsUpdate))
                 }
+                NoxsLog.i(TAG, "HTTPS apt update ok in ${httpsUpdate.durationMs} ms")
 
                 onLog("Finishing interrupted package configuration")
                 RootfsConfigurator.repairDpkgPermissions(paths)
-                var finalDpkg = run(listOf("/usr/bin/dpkg", "--configure", "-a"), 240)
-                if (finalDpkg.exitCode != 0 || finalDpkg.timedOut) {
+                var finalDpkg = run(AptBootstrapCommands.dpkgConfigureCommand(), 240)
+                if (finalDpkg.failed) {
                     onLog("Retrying dpkg configuration after authenticated dependency repair")
                     val dependencyRepair = run(
                         aptCommand("--fix-broken", "install", "--yes", "--no-install-recommends"),
@@ -138,21 +188,21 @@ class NoxsAptBootstrapper(
                         return@synchronized Result(false, summarize("final apt dependency repair", dependencyRepair))
                     }
                     RootfsConfigurator.repairDpkgPermissions(paths)
-                    finalDpkg = run(listOf("/usr/bin/dpkg", "--configure", "-a"), 240)
+                    finalDpkg = run(AptBootstrapCommands.dpkgConfigureCommand(), 240)
                 }
                 if (!requireSuccessful("dpkg --configure -a", finalDpkg, onLog)) {
                     return@synchronized Result(false, summarize("dpkg --configure -a", finalDpkg))
                 }
-                val audit = run(listOf("/usr/bin/dpkg", "--audit"), 60)
+                val audit = run(AptBootstrapCommands.dpkgAuditCommand(), 60)
                 if (audit.timedOut || audit.exitCode != 0 || audit.output.isNotBlank()) {
                     return@synchronized failure("dpkg audit found incomplete package state", audit, onLog)
                 }
 
+                // 6 — final verification: real package state, real metadata.
                 val installedCerts = run(
-                    listOf("/bin/bash", "-c", "/usr/bin/dpkg -s ca-certificates | /bin/grep -q '^Status: install ok installed$'"),
-                    30
+                    AptBootstrapCommands.packageInstalledCommand("ca-certificates"), 30
                 )
-                if (installedCerts.exitCode != 0 || installedCerts.timedOut) {
+                if (installedCerts.failed) {
                     return@synchronized failure("ca-certificates is not in the installed state", installedCerts, onLog)
                 }
                 val metadata = run(listOf("/usr/bin/apt-cache", "policy", "ca-certificates"), 60)
@@ -161,6 +211,7 @@ class NoxsAptBootstrapper(
                     return@synchronized failure("APT package metadata verification failed", metadata, onLog)
                 }
                 reportOutput("APT metadata", metadata, onLog)
+                onLog("Verifying certificates: package and metadata state verified")
 
                 val markerTemp = File(paths.base, "${paths.aptReadyMarker.name}.tmp")
                 markerTemp.writeText("verified=${System.currentTimeMillis()}\nsuite=bookworm\ntransport=https\n")
@@ -172,11 +223,11 @@ class NoxsAptBootstrapper(
                     markerTemp.delete()
                     return@synchronized Result(false, "Cannot save APT readiness marker")
                 }
-                onLog("APT, dpkg, CA certificates, signed metadata and HTTPS verified")
-                NoxsLog.i("AptBootstrap", "APT initialized with signed Bookworm HTTPS sources")
+                onLog("Completed: APT, dpkg, CA certificates, signed metadata and HTTPS verified")
+                NoxsLog.i(TAG, "APT initialized with signed Bookworm HTTPS sources")
                 Result(true)
             } catch (e: Exception) {
-                NoxsLog.e("AptBootstrap", "APT bootstrap failed", e)
+                NoxsLog.e(TAG, "APT bootstrap failed", e)
                 Result(false, e.message ?: e.javaClass.simpleName)
             } finally {
                 NoxsPkgTransaction.clearFlag(paths)
@@ -186,8 +237,53 @@ class NoxsAptBootstrapper(
     private fun aptCommand(vararg args: String): List<String> =
         listOf("/usr/bin/apt-get") + APT_OPTIONS + args
 
+    /**
+     * Bounded retry wrapper for network-dependent steps. Retries only while
+     * failures differ; two identical failures in a row abort immediately so
+     * the real error reaches the user instead of an infinite loop.
+     */
+    private fun runWithRetry(
+        step: String,
+        command: List<String>,
+        timeoutSeconds: Long,
+        onLog: (String) -> Unit
+    ): CommandResult {
+        val outcome = AptRetryLoop.run(
+            maxAttempts = AptRetryPolicy.MAX_ATTEMPTS,
+            delayForAttempt = { AptRetryPolicy.delayForAttempt(it) },
+            sleep = { sleepWithCancel(it) },
+            onRetryScheduled = { retryIndex, retriesTotal, delayMs, previousSignature ->
+                onLog("$step: retry $retryIndex/$retriesTotal in ${delayMs / 1000}s — " +
+                    "previous failure: ${previousSignature.lineSequence().firstOrNull().orEmpty()}")
+            },
+            execute = { run(command, timeoutSeconds) }
+        )
+        if (outcome.abortedIdentical) {
+            onLog("$step: the same failure repeated — further retries will not help")
+            NoxsLog.e(TAG, "$step aborted after identical repeated failure: ${outcome.result.signature}")
+        }
+        return outcome.result
+    }
+
+    /** Cancellable sleep used between retry attempts. */
+    private fun sleepWithCancel(ms: Long) {
+        var remaining = ms
+        while (remaining > 0) {
+            if (isCancelled()) throw SetupCancelledException()
+            val slice = if (remaining > 200) 200 else remaining
+            try {
+                Thread.sleep(slice)
+            } catch (_: InterruptedException) {
+                if (isCancelled()) throw SetupCancelledException()
+            }
+            remaining -= slice
+        }
+        if (isCancelled()) throw SetupCancelledException()
+    }
+
     private fun run(command: List<String>, timeoutSeconds: Long): CommandResult {
         if (isCancelled()) throw SetupCancelledException()
+        val startedAt = System.nanoTime()
         val process = ProcessBuilder(launcher.oneShotArgv(command, asRoot = true)).apply {
             redirectErrorStream(true)
             launcher.applyEnvTo(this, mapOf(
@@ -227,7 +323,8 @@ class NoxsAptBootstrapper(
         return CommandResult(
             exitCode = if (finished) process.exitValue() else 124,
             output = captured,
-            timedOut = !finished
+            timedOut = !finished,
+            durationMs = (System.nanoTime() - startedAt) / 1_000_000L
         )
     }
 
@@ -236,7 +333,11 @@ class NoxsAptBootstrapper(
         val insecureOrTlsFailure = INSECURE_OR_TLS_FAILURE.containsMatchIn(result.output)
         val partialUpdateFailure = step.contains("apt update") && PARTIAL_UPDATE_FAILURE.containsMatchIn(result.output)
         val success = !result.timedOut && result.exitCode == 0 && !insecureOrTlsFailure && !partialUpdateFailure
-        if (!success) NoxsLog.e("AptBootstrap", summarize(step, result))
+        if (!success) {
+            NoxsLog.e(TAG, summarize(step, result))
+        } else if (result.durationMs >= 1_000) {
+            NoxsLog.i(TAG, "$step ok in ${result.durationMs} ms")
+        }
         return success
     }
 
@@ -252,7 +353,7 @@ class NoxsAptBootstrapper(
     private fun failure(step: String, result: CommandResult, onLog: (String) -> Unit): Result {
         reportOutput(step, result, onLog)
         val detail = summarize(step, result)
-        NoxsLog.e("AptBootstrap", detail)
+        NoxsLog.e(TAG, detail)
         return Result(false, detail)
     }
 
@@ -266,14 +367,26 @@ class NoxsAptBootstrapper(
             append(step)
             append(" failed (exit ")
             append(result.exitCode)
-            append(if (result.timedOut) ", timed out)" else ")")
+            append(if (result.timedOut) ", timed out" else "")
+            append(", ${SetupOpTracker.formatElapsed(result.durationMs)}")
+            append(")")
             if (detail.isNotBlank()) append(":\n").append(detail)
         }
     }
 
-    private data class CommandResult(val exitCode: Int, val output: String, val timedOut: Boolean)
+    private data class CommandResult(
+        val exitCode: Int,
+        val output: String,
+        val timedOut: Boolean,
+        val durationMs: Long = 0L
+    ) : AptRetryLoop.Attempted {
+        override val failed: Boolean get() = timedOut || exitCode != 0
+        override val signature: String
+            get() = AptRetryPolicy.failureSignature(output, exitCode, timedOut)
+    }
 
     companion object {
+        private const val TAG = "AptBootstrap"
         private val PROCESS_LOCK = Any()
         private const val MAX_CAPTURE_CHARS = 48_000
         private val APT_OPTIONS = listOf(

@@ -120,7 +120,9 @@ class NoxsSetupSession(
     }
 
     private fun liveLine(plain: String, ansi: String) {
-        val pad = (CONSOLE_WIDTH - plain.length).coerceAtLeast(0)
+        // Padding capped by the real width so the rewrite can never wrap.
+        val width = SetupConsoleText.safeWidth(terminal.emulator.buffer.cols)
+        val pad = SetupConsoleText.livePadding(plain.length, width)
         console("\r" + ansi + " ".repeat(pad))
         liveLineActive = true
         liveLineIsSpinner = false
@@ -147,12 +149,19 @@ class NoxsSetupSession(
     private fun opForLogLine(line: String): String? {
         val lower = line.lowercase(Locale.US)
         return when {
+            lower.contains("checking repositories") ->
+                "Checking repositories"
             lower.contains("checking for interrupted dpkg configuration") ->
                 "Checking for interrupted dpkg configuration"
             lower.contains("refreshing signed debian package metadata") ->
                 "Refreshing signed Debian package metadata"
-            lower.contains("installing or repairing ca-certificates") ->
-                "Installing or repairing ca-certificates"
+            lower.contains("installing ca-certificates") ||
+                lower.contains("installing or repairing ca-certificates") ->
+                "Installing ca-certificates"
+            lower.contains("updating certificate bundle") ->
+                "Updating certificate bundle"
+            lower.contains("verifying certificates") ->
+                "Verifying certificates"
             lower.contains("archive keyring") ->
                 "Installing Debian archive keyring"
             lower.contains("finishing interrupted package configuration") ||
@@ -181,7 +190,13 @@ class NoxsSetupSession(
 
     private fun writeOpLine(name: String, frame: Char, elapsed: String) {
         // \r + EL: the line updates in place — no new lines are created.
-        console("\r\u001b[1;32m[ Noxs ]\u001b[0m $frame $name  $elapsed\u001b[K")
+        // The visible text is clamped to the terminal's REAL column count;
+        // an unclamped line wraps, and every tick would then spill a new
+        // screen row carrying the same status (the "stuck repeating" flood).
+        val width = SetupConsoleText.safeWidth(terminal.emulator.buffer.cols)
+        val (prefix, body) = SetupConsoleText.opLine(name, frame, elapsed, width)
+        val prefixAnsi = if (prefix.isEmpty()) "" else "\u001b[1;32m$prefix\u001b[0m "
+        console("\r$prefixAnsi$body\u001b[K")
         liveLineActive = true
         liveLineIsSpinner = true
     }
@@ -268,8 +283,14 @@ class NoxsSetupSession(
         if (doneBytes >= totalBytes && totalBytes > 0) {
             endLiveLine(" \u001b[1;32mok (${mb(totalBytes)} MB, SHA-256 verified)\u001b[0m")
         } else {
-            val plain = "[ Noxs ] ${mb(doneBytes)} / ${mb(totalBytes)} MB ($pct%)"
-            liveLine(plain, "\u001b[1;32m[ Noxs ]\u001b[0m ${mb(doneBytes)} / ${mb(totalBytes)} MB ($pct%)")
+            // Pick the most informative progress body that still fits the
+            // real terminal width — a wrapping live line would flood.
+            val body = liveBody(
+                "${mb(doneBytes)} / ${mb(totalBytes)} MB ($pct%)",
+                "${mb(doneBytes)}/${mb(totalBytes)}MB",
+                "${mb(doneBytes)}MB"
+            )
+            liveLine("[ Noxs ] $body", "\u001b[1;32m[ Noxs ]\u001b[0m $body")
         }
     }
 
@@ -278,8 +299,24 @@ class NoxsSetupSession(
         if (now - lastLiveRenderMs < LIVE_RENDER_INTERVAL_MS) return
         lastLiveRenderMs = now
         val count = "%,d".format(Locale.US, entries)
-        val plain = "[ Noxs ] $count entries extracted"
-        liveLine(plain, "\u001b[1;32m[ Noxs ]\u001b[0m $count entries extracted")
+        val body = liveBody(
+            "$count entries extracted",
+            "$entries extracted",
+            "$entries ex"
+        )
+        liveLine("[ Noxs ] $body", "\u001b[1;32m[ Noxs ]\u001b[0m $body")
+    }
+
+    /** First informative-enough body that fits the terminal's real width. */
+    private fun liveBody(full: String, medium: String, short: String): String {
+        val width = SetupConsoleText.safeWidth(terminal.emulator.buffer.cols)
+        val prefixLen = "[ Noxs ] ".length
+        return when {
+            prefixLen + full.length <= width - 1 -> full
+            prefixLen + medium.length <= width - 1 -> medium
+            prefixLen + short.length <= width - 1 -> short
+            else -> short.take((width - prefixLen - 1).coerceAtLeast(1))
+        }
     }
 
     private fun mb(bytes: Long): String = "%.1f".format(Locale.US, bytes / (1024.0 * 1024.0))
@@ -676,7 +713,6 @@ class NoxsSetupSession(
 
     private companion object {
         const val LIVE_RENDER_INTERVAL_MS = 300L
-        const val CONSOLE_WIDTH = 40
         const val MAX_LOG_BYTES = 512L * 1024
         val ANSI = Regex("\u001B\\[[0-9;]*[A-Za-z]")
     }

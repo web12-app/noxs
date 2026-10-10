@@ -31,9 +31,15 @@ While setup runs, every long operation is tracked by `SetupOpTracker`
   the real elapsed time; failures keep the full real error text below it.
 * The slim toolbar mirrors the state: `⠋ <operation>` + elapsed. No progress
   percentages anywhere unless they are real (download bytes, tar entries).
+* Live lines are clamped to the terminal's REAL column count (`CR`+`EL`
+  rewrites must never wrap — an overflowing line would spill one new row per
+  tick and flood the console with the same status). Below 24 columns the
+  console falls back to `frame elapsed` only; the full operation name stays
+  visible in the toolbar.
 
-Operations include: Checking for interrupted dpkg configuration · Refreshing
-signed Debian package metadata · Installing or repairing ca-certificates ·
+Operations include: Checking repositories · Checking for interrupted dpkg
+configuration · Refreshing signed Debian package metadata · Installing
+certificates · Updating certificate bundle · Verifying certificates ·
 Installing Debian archive keyring · Repairing pending dpkg configuration ·
 Preparing workspace · Preparing secure connections · Creating Linux account ·
 Installing required packages · Verifying filesystem · Extracting rootfs ·
