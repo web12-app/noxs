@@ -118,21 +118,23 @@ class SettingsActivity : AppCompatActivity() {
                 .setPositiveButton(R.string.action_apply, null)
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
-                .getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    val raw = input.text.toString().trim()
-                    val value = raw.toLongOrNull()
-                    val valid = value != null && value >= min && (max == null || value <= max)
-                    if (valid) {
-                        onValid(value!!)
-                        it.dismiss()
-                    } else {
-                        // Never silently clamp — state the allowed range (spec §6).
-                        error.text = if (max == null) {
-                            getString(R.string.settings_error_min_value, min)
+                .also { dialog ->
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val raw = input.text.toString().trim()
+                        val value = raw.toLongOrNull()
+                        val valid = value != null && value >= min && (max == null || value <= max)
+                        if (valid) {
+                            onValid(value!!)
+                            dialog.dismiss()
                         } else {
-                            getString(R.string.settings_error_range, min, max)
+                            // Never silently clamp — state the allowed range (spec §6).
+                            error.text = if (max == null) {
+                                getString(R.string.settings_error_min_value, min)
+                            } else {
+                                getString(R.string.settings_error_range, min, max)
+                            }
+                            error.visibility = View.VISIBLE
                         }
-                        error.visibility = View.VISIBLE
                     }
                 }
         }
@@ -169,17 +171,19 @@ class SettingsActivity : AppCompatActivity() {
                 .setPositiveButton(R.string.action_apply, null)
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
-                .getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    val url = input.text.toString().trim()
-                    val uri = runCatching { Uri.parse(url) }.getOrNull()
-                    val valid = url.isEmpty() ||
-                        (uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank())
-                    if (valid) {
-                        onValid(url)
-                        it.dismiss()
-                    } else {
-                        error.setText(R.string.settings_error_url)
-                        error.visibility = View.VISIBLE
+                .also { dialog ->
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val url = input.text.toString().trim()
+                        val uri = runCatching { Uri.parse(url) }.getOrNull()
+                        val valid = url.isEmpty() ||
+                            (uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank())
+                        if (valid) {
+                            onValid(url)
+                            dialog.dismiss()
+                        } else {
+                            error.setText(R.string.settings_error_url)
+                            error.visibility = View.VISIBLE
+                        }
                     }
                 }
         }
@@ -245,22 +249,21 @@ class SettingsActivity : AppCompatActivity() {
                 .setPositiveButton(R.string.action_apply, null)
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
-                .getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    // Blank lines and # comments are ignored (spec §7).
-                    val servers = input.text.toString().lines()
-                        .map { it.trim() }
-                        .filter { it.isNotEmpty() && !it.startsWith("#") }
-                    val invalid = servers.firstOrNull { !validIp(it) }
-                    if (invalid != null) {
-                        error.text = getString(R.string.settings_error_dns, invalid)
-                        error.visibility = View.VISIBLE
-                    } else if (servers.isEmpty()) {
-                        // Nothing valid entered — keep the current configuration.
-                        onValid(emptyList())
-                        it.dismiss()
-                    } else {
-                        onValid(servers)
-                        it.dismiss()
+                .also { dialog ->
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        // Blank lines and # comments are ignored (spec §7).
+                        val servers = input.text.toString().lines()
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() && !it.startsWith("#") }
+                        val invalid = servers.firstOrNull { !validIp(it) }
+                        if (invalid != null) {
+                            error.text = getString(R.string.settings_error_dns, invalid)
+                            error.visibility = View.VISIBLE
+                        } else {
+                            // Empty input keeps the current configuration.
+                            onValid(servers)
+                            dialog.dismiss()
+                        }
                     }
                 }
         }
