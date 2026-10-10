@@ -50,5 +50,15 @@
     <color name="noxs_status_ok">#FF20D866</color>
     <color name="noxs_status_warn">#FFFFB020</color>
     <color name="noxs_status_err">#FFFF5252</color>
+    <!-- Settings redesign palette (dark navy cards, green accent) -->
+    <color name="settings_background">#FF050B14</color>
+    <color name="settings_card">#FF0D1725</color>
+    <color name="settings_elevated">#FF162335</color>
+    <color name="settings_accent">#FF16D66A</color>
+    <color name="settings_text">#FFF5F7FA</color>
+    <color name="settings_text_secondary">#FFA5B1C2</color>
+    <color name="settings_divider">#FF243347</color>
+    <color name="settings_disabled">#FF626B78</color>
+    <color name="settings_error">#FFFF5B67</color>
     <color name="ic_launcher_background">#FF000000</color>
 </resources>

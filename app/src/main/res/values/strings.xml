@@ -99,6 +99,7 @@
     <string name="action_install">Install</string>
     <string name="action_create">Create</string>
     <string name="action_apply">Apply</string>
+    <string name="action_navigate_back">Back</string>
     <string name="action_confirm">Confirm</string>
     <string name="action_cancel">Cancel</string>
     <string name="err_generic">Something went wrong. See Diagnostics for details.</string>
@@ -281,7 +282,7 @@
     <!-- Settings → Terminal -->
     <string name="settings_terminal_title">Terminal</string>
     <string name="settings_terminal_entry_desc">Appearance, interaction, scrolling, behavior</string>
-    <string name="settings_section_terminal">TERMINAL</string>
+    <string name="settings_section_terminal">Terminal</string>
     <string name="settings_section_advanced">ADVANCED</string>
     <string name="settings_section_reset">RESET</string>
     <string name="settings_state_on">%1$s on</string>
@@ -547,13 +548,41 @@
     <string name="terminal_font_size_value">Font size: %1$d sp</string>
 
     <!-- Settings sections (UI redesign) -->
-    <string name="settings_section_appearance">APPEARANCE</string>
+    <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_performance">PERFORMANCE</string>
-    <string name="settings_section_session">SESSION</string>
-    <string name="settings_section_network">BOOTSTRAP &amp; NETWORK</string>
+    <string name="settings_section_session">Session</string>
+    <string name="settings_section_network">Bootstrap &amp; Network</string>
     <string name="settings_header_stats">Show CPU and memory in header</string>
     <string name="settings_header_stats_desc">Live resource usage next to the session name</string>
     <string name="settings_dark_theme">Dark theme</string>
     <string name="settings_dark_theme_desc">Noxs uses one high-contrast dark theme across the app</string>
+    <!-- Settings redesign: sections, descriptions, numeric/network validation -->
+    <string name="settings_section_general">General</string>
+    <string name="settings_section_storage">Storage &amp; Performance</string>
+    <string name="settings_header_stats_short">Show CPU and memory in header</string>
+    <string name="settings_header_stats_short_desc">Display CPU and memory usage in the terminal header</string>
+    <string name="settings_keep_awake_desc">Keep CPU awake — servers stay reachable outside Noxs</string>
+    <string name="settings_max_sessions_desc">Maximum concurrent terminal sessions</string>
+    <string name="settings_max_procs_desc">Maximum processes allowed in a session</string>
+    <string name="settings_storage_warn_desc">Alert when storage usage exceeds this value (MB)</string>
+    <string name="settings_rootfs_url_desc">Use a custom Linux root filesystem URL (https)</string>
+    <string name="settings_dns_desc">Guest DNS servers, one per line (IPv4/IPv6)</string>
+    <string name="settings_dns_note">Applies to the Linux environment resolver (/etc/resolv.conf inside Noxs) — Android system DNS is never modified.</string>
+    <string name="settings_url_note">Optional. Leave empty to use the official Noxs mirrors. Remote downloads require https.</string>
+    <string name="settings_value_sessions">%1$d concurrent sessions</string>
+    <string name="settings_value_processes">%1$d processes</string>
+    <string name="settings_value_mb">%1$d MB</string>
+    <string name="settings_value_dns_servers">%1$d servers</string>
+    <string name="settings_error_range">Enter a number between %1$d and %2$d</string>
+    <string name="settings_error_min_value">Enter a value of at least %1$d</string>
+    <string name="settings_error_url">Enter a valid https:// URL, or leave the field empty</string>
+    <string name="settings_error_dns">Invalid IP address: %1$s</string>
+    <string name="settings_edit_value">Edit value</string>
+    <string name="settings_edit_url">Custom rootfs URL</string>
+    <string name="settings_edit_dns">DNS servers</string>
+    <string name="settings_dns_hint">One server per line. Blank lines and # comments are ignored.</string>
+    <string name="settings_extra_keys_desc">Display additional keys above the keyboard</string>
+    <string name="settings_volume_keys_desc">Use volume keys for terminal navigation</string>
+    <string name="settings_bell_desc">Play a sound on terminal events</string>
 
 </resources>
