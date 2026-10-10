@@ -403,11 +403,6 @@ class SettingsActivity : AppCompatActivity() {
         addSection(
             getString(R.string.settings_section_environment),
             SettingsWidgets.navRow(
-                this, R.drawable.ic_nav_env, tintGreen,
-                getString(R.string.settings_environment_title),
-                getString(R.string.settings_environment_desc)
-            ) { startActivity(Intent(this, EnvironmentManagerActivity::class.java)) },
-            SettingsWidgets.navRow(
                 this, R.drawable.ic_nav_security, tintBlue,
                 getString(R.string.settings_permission_title),
                 getString(R.string.settings_permission_desc)

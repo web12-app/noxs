@@ -109,8 +109,6 @@ fi
 if [ "$MODE" = "--all" ] || [ "$MODE" = "--nx" ]; then
     step "nx package system functional tests"
     bash scripts/test_nx_functions.sh || fail "nx functional tests"
-    step "nx env (Multi-Env Manager CLI) end-to-end tests"
-    bash scripts/test_nx_env.sh || fail "nx env e2e tests"
     step "nx vpn (Tor over PRoot) offline tests"
     bash scripts/test_nx_vpn.sh || fail "nx vpn tests"
 fi

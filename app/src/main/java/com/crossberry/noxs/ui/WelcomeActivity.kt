@@ -1,8 +1,9 @@
 /*
  * Noxs — original implementation.
- * Welcome screen: entry point. Routes first-time users to the environment
- * picker (spec §1, §51), existing users to the terminal, and never silently
- * installs anything (spec §4).
+ * Welcome screen: entry point. Routes first-time users to the Debian
+ * environment installer (one environment — the multi-OS picker was
+ * removed), existing users to the terminal, and never silently installs
+ * anything (spec §4).
  */
 package com.crossberry.noxs.ui
 
@@ -37,8 +38,13 @@ class WelcomeActivity : AppCompatActivity() {
             startActivity(
                 Intent(
                     this,
-                    if (ready) SettingsActivity::class.java else EnvironmentPickerActivity::class.java
-                )
+                    if (ready) SettingsActivity::class.java else EnvironmentInstallActivity::class.java
+                ).apply {
+                    // One environment, one installer: Debian 12 (bookworm).
+                    // The multi-OS picker was removed.
+                    putExtra(EnvironmentInstallActivity.EXTRA_PROVIDER_ID, "debian")
+                    putExtra(EnvironmentInstallActivity.EXTRA_VARIANT_ID, "bookworm")
+                }
             )
         }
         binding.btnTerminal.setOnClickListener {

@@ -1,7 +1,5 @@
 package com.crossberry.noxs.environments
 
-import com.crossberry.noxs.environments.download.ChecksumAlgorithm
-import com.crossberry.noxs.environments.download.ChecksumsFile
 import com.crossberry.noxs.environments.model.CompatibilityLevel
 import com.crossberry.noxs.environments.model.Environment
 import com.crossberry.noxs.environments.model.EnvironmentStatus
@@ -107,49 +105,6 @@ class SetupStateMachineTest {
         assertNotNull(restored)
         assertEquals(task, restored)
         assertEquals(42, restored!!.progress)
-    }
-}
-
-class ChecksumsFileTest {
-
-    @Test fun `parses standard sha256 sums format`() {
-        val content = """
-            # comment line
-            a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2 *ubuntu-base-24.04.5-base-arm64.tar.gz
-            7b2dced6dd56ad5e4a813fa25c8de307b655fdabc6ea9213175a92c48dabb048 *ubuntu-base-24.04.3-base-arm64.tar.gz
-        """.trimIndent()
-        assertEquals(
-            "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
-            ChecksumsFile.forFile(content, ChecksumAlgorithm.SHA256, "ubuntu-base-24.04.5-base-arm64.tar.gz")
-        )
-    }
-
-    @Test fun `parses kali sums with two spaces and no star`() {
-        val content = "d6403a5da175df325611d23af4b92330856059c45454eced7f4cdf3ca6df2e4e  kali-nethunter-rootfs-minimal-arm64.tar.xz\n"
-        assertEquals(
-            "d6403a5da175df325611d23af4b92330856059c45454eced7f4cdf3ca6df2e4e",
-            ChecksumsFile.forFile(content, ChecksumAlgorithm.SHA256, "kali-nethunter-rootfs-minimal-arm64.tar.xz")
-        )
-    }
-
-    @Test fun `parses bsd md5 style`() {
-        val content = "MD5 (ArchLinuxARM-aarch64-latest.tar.gz) = 23eec86365b24f7913c403e8f4e8719b\n"
-        assertEquals(
-            "23eec86365b24f7913c403e8f4e8719b",
-            ChecksumsFile.forFile(content, ChecksumAlgorithm.MD5, "ArchLinuxARM-aarch64-latest.tar.gz")
-        )
-    }
-
-    @Test fun `returns null for unknown file and rejects bad hex`() {
-        assertNull(ChecksumsFile.forFile("nope\n", ChecksumAlgorithm.SHA256, "missing.tar"))
-        assertTrue(ChecksumsFile.parse("zzzz  file.tar", ChecksumAlgorithm.SHA256).isEmpty())
-    }
-
-    @Test fun `hash length validation matches algorithm`() {
-        assertTrue(ChecksumsFile.validate(
-            com.crossberry.noxs.environments.download.ChecksumEntry(ChecksumAlgorithm.SHA256, "a".repeat(64), "f")))
-        assertFalse(ChecksumsFile.validate(
-            com.crossberry.noxs.environments.download.ChecksumEntry(ChecksumAlgorithm.SHA256, "a".repeat(32), "f")))
     }
 }
 

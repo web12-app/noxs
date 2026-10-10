@@ -32,7 +32,6 @@ for name, content, mirror in extract_nx.nx_shell_scripts(root):
     module = {'NX_CLI': 'bin/nx', 'PKG_LIB': 'noxs-pkg/pkg-lib.sh',
               'PKG_INIT': 'noxs-pkg/pkg-init.sh', 'PKG_DEV': 'noxs-pkg/pkg-dev.sh',
               'PKG_INSTALL': 'noxs-pkg/pkg-install.sh', 'WEB_LIB': 'noxs-pkg/web-lib.sh',
-              'ENV_LIB': 'noxs-pkg/env-lib.sh',
               'VPN_LIB': 'noxs-pkg/vpn-lib.sh',
               'PLUG_LIB': 'noxs-pkg/plug-lib.sh',
               'CERT_FIX_LIB': 'noxs-pkg/cert-fix.sh',

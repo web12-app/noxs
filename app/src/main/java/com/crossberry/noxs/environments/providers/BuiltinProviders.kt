@@ -2,30 +2,18 @@
  * Noxs — original implementation.
  * Builtin environment providers (spec §22-§27).
  *
- * Download metadata uses ONLY official HTTPS sources, verified live at
- * install time from the distros' own checksum files, with pinned fallbacks
- * captured from the same official sources at build time:
- *
- *   Debian  — bootstrap.manifest (pinned debuerreotype artifact, CI-managed)
- *   Ubuntu  — cdimage.ubuntu.com ubuntu-base + official SHA256SUMS (live)
- *   Kali    — kali.download NetHunter rootless rootfs + official SHA256SUMS (live)
- *   Arch    — de3.mirror.archlinuxarm.org (official HTTPS mirror) + official MD5
- *   Parrot  — honest LIMITED: no official ARM64 rootfs image exists
- *   Termux  — detection-only integration (never fakes a Debian rootfs, §24)
+ * Debian 12 (bookworm) is the one and only environment: installed through
+ * the proven NoxsInstaller pipeline (staged downloads, TarGuard extraction,
+ * signed APT bootstrap) from the pinned debuerreotype artifact that the CI
+ * release manages. There is no variant matrix to maintain.
  */
 package com.crossberry.noxs.environments.providers
 
 import com.crossberry.noxs.environments.DeviceProfile
 import com.crossberry.noxs.environments.EnvironmentProvider
-import com.crossberry.noxs.environments.model.CompatibilityCheck
-import com.crossberry.noxs.environments.model.CompatibilityLevel
-import com.crossberry.noxs.environments.model.CompatibilityReport
 import com.crossberry.noxs.environments.model.EnvironmentCapability
-import com.crossberry.noxs.environments.model.EnvironmentFamily
-import com.crossberry.noxs.environments.model.EnvironmentMetadata
+import com.crossberry.noxs.environments.model.CompatibilityReport
 import com.crossberry.noxs.environments.model.EnvironmentVariant
-import com.crossberry.noxs.environments.model.PackageManagerKind
-import com.crossberry.noxs.environments.download.ChecksumAlgorithm
 
 // ------------------------------------------------------------------- Debian
 
@@ -108,246 +96,11 @@ class DebianProvider : EnvironmentProvider {
         )
 }
 
-// ------------------------------------------------------------------- Ubuntu
-
-class UbuntuProvider : RootfsTarballProvider() {
-    override val distro = DistroSpecs.UBUNTU
-    override val id = "ubuntu"
-    override val displayName = "Ubuntu"
-    override val description = "Developer-friendly Linux"
-
-    init {
-        registerVariant(
-            EnvironmentVariant(
-                id = "noble",
-                name = "24.04 LTS (noble)",
-                description = "Ubuntu base userspace for ARM64",
-                downloadBytesEstimate = 29_936_675L,
-                extractedBytesEstimate = 85_000_000L,
-                isDefault = true
-            ),
-            ImageSpec(
-                url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
-                fileName = "ubuntu-base-24.04.5-base-arm64.tar.gz",
-                format = "tar.gz",
-                pinnedChecksum = "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
-                algorithm = ChecksumAlgorithm.SHA256,
-                sumsUrl = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS",
-                downloadBytesEstimate = 29_936_675L,
-                extractedBytesEstimate = 85_000_000L
-            )
-        )
-    }
-}
-
-// --------------------------------------------------------------------- Kali
-
-/**
- * Kali NetHunter Rootless (spec §8, §9, §25). The official installer workflow
- * is used only as the REFERENCE: Noxs implements architecture detection,
- * image selection (full/minimal/nano), download, checksum verification,
- * extraction and rootless setup as explicit Noxs-controlled operations —
- * the official shell script is never downloaded or executed (spec §66).
- */
-class KaliNetHunterProvider : RootfsTarballProvider() {
-    override val distro = DistroSpecs.KALI
-    override val id = "kali"
-    override val displayName = "Kali NetHunter Rootless"
-    override val description = "Security-focused Linux userspace"
-
-    init {
-        registerVariant(
-            EnvironmentVariant(
-                id = "minimal",
-                name = "Minimal",
-                description = "Core Kali tools — balanced size (default)",
-                downloadBytesEstimate = 137_313_840L,
-                extractedBytesEstimate = 780_000_000L,
-                isDefault = true
-            ),
-            ImageSpec(
-                url = "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-arm64.tar.xz",
-                fileName = "kali-nethunter-rootfs-minimal-arm64.tar.xz",
-                format = "tar.xz",
-                pinnedChecksum = "d6403a5da175df325611d23af4b92330856059c45454eced7f4cdf3ca6df2e4e",
-                algorithm = ChecksumAlgorithm.SHA256,
-                sumsUrl = "https://kali.download/nethunter-images/current/rootfs/SHA256SUMS",
-                downloadBytesEstimate = 137_313_840L,
-                extractedBytesEstimate = 780_000_000L
-            )
-        )
-        registerVariant(
-            EnvironmentVariant(
-                id = "full",
-                name = "Full",
-                description = "The complete Kali toolset — large download",
-                downloadBytesEstimate = 1_764_123_932L,
-                extractedBytesEstimate = 5_500_000_000L,
-                isDefault = false
-            ),
-            ImageSpec(
-                url = "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-full-arm64.tar.xz",
-                fileName = "kali-nethunter-rootfs-full-arm64.tar.xz",
-                format = "tar.xz",
-                pinnedChecksum = "fd108959bd9252b03d1ce3d573afaef2e372e4a0f137d256ba5f92e41d62ca6e",
-                algorithm = ChecksumAlgorithm.SHA256,
-                sumsUrl = "https://kali.download/nethunter-images/current/rootfs/SHA256SUMS",
-                downloadBytesEstimate = 1_764_123_932L,
-                extractedBytesEstimate = 5_500_000_000L
-            )
-        )
-        registerVariant(
-            EnvironmentVariant(
-                id = "nano",
-                name = "Nano",
-                description = "Smallest Kali userspace — only the essentials",
-                downloadBytesEstimate = 198_274_248L,
-                extractedBytesEstimate = 900_000_000L,
-                isDefault = false
-            ),
-            ImageSpec(
-                url = "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-nano-arm64.tar.xz",
-                fileName = "kali-nethunter-rootfs-nano-arm64.tar.xz",
-                format = "tar.xz",
-                pinnedChecksum = "2ea1c50446b9b35506c4b1cc84a731c752892baafe0dc2a1332e460c2d2a1e4e",
-                algorithm = ChecksumAlgorithm.SHA256,
-                sumsUrl = "https://kali.download/nethunter-images/current/rootfs/SHA256SUMS",
-                downloadBytesEstimate = 198_274_248L,
-                extractedBytesEstimate = 900_000_000L
-            )
-        )
-    }
-
-    override fun capabilities() = super.capabilities() + setOf(
-        EnvironmentCapability.GUI_KE_X // KeX GUI is optional in the official workflow
-    )
-}
-
-// --------------------------------------------------------------------- Arch
-
-class ArchProvider : RootfsTarballProvider() {
-    override val distro = DistroSpecs.ARCH
-    override val id = "arch"
-    override val displayName = "Arch Linux"
-    override val description = "Rolling-release Linux"
-
-    init {
-        registerVariant(
-            EnvironmentVariant(
-                id = "aarch64",
-                name = "Arch Linux ARM (aarch64)",
-                description = "Rolling release with pacman",
-                downloadBytesEstimate = 829_367_415L,
-                extractedBytesEstimate = 2_100_000_000L,
-                isDefault = true
-            ),
-            ImageSpec(
-                url = "https://de3.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
-                mirrors = listOf(
-                    "https://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
-                ),
-                fileName = "ArchLinuxARM-aarch64-latest.tar.gz",
-                format = "tar.gz",
-                pinnedChecksum = "23eec86365b24f7913c403e8f4e8719b",
-                algorithm = ChecksumAlgorithm.MD5, // official Arch ARM checksum
-                sumsUrl = "https://de3.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz.md5",
-                downloadBytesEstimate = 829_367_415L,
-                extractedBytesEstimate = 2_100_000_000L
-            )
-        )
-    }
-
-    override fun checkCompatibility(device: DeviceProfile): CompatibilityReport {
-        val base = super.checkCompatibility(device)
-        // Honest note: Arch ARM's rolling toolchain expects more free RAM.
-        return if (base.level == CompatibilityLevel.SUPPORTED && device.availableRamBytes in 1 until 1_500_000_000L) {
-            CompatibilityReport(
-                CompatibilityLevel.LIMITED,
-                base.checks + CompatibilityCheck("Workload", null, "rolling-release builds can be RAM-heavy"),
-                base.reasons
-            )
-        } else base
-    }
-}
-
-// ------------------------------------------------------------------- Parrot
-
-/**
- * Parrot OS (spec §27): "Do not assume every Parrot image is compatible with
- * every Android architecture. Check actual provider metadata." Parrot does
- * not publish an official ARM64 rootfs tarball — Noxs reports this honestly
- * instead of faking an install (spec §5 example: "Parrot: ⚠ Limited").
- */
-class ParrotProvider : EnvironmentProvider {
-    override val id = "parrot"
-    override val displayName = "Parrot OS"
-    override val description = "Security/privacy-focused Linux"
-
-    override fun capabilities() = setOf(EnvironmentCapability.TERMINAL)
-
-    override fun variants(): List<EnvironmentVariant> = emptyList()
-
-    override fun checkCompatibility(device: DeviceProfile): CompatibilityReport = CompatibilityReport(
-        level = CompatibilityLevel.LIMITED,
-        checks = listOf(
-            CompatibilityCheck("CPU architecture (${device.abi})", null,
-                "no official ARM64 rootfs image published by Parrot"),
-            CompatibilityCheck("Official image", false,
-                "Parrot publishes no installable rootfs for Android/proot; community images only"),
-            CompatibilityCheck("Status", null,
-                "not installable in this Noxs version — shown honestly instead of faked")
-        ),
-        reasons = listOf("No official Parrot ARM64 rootfs image is available")
-    )
-
-    override fun canInstall(device: DeviceProfile): Boolean = false
-}
-
-// ------------------------------------------------------------------- Termux
-
-/**
- * Termux (spec §24) is fundamentally different: an Android-native userspace
- * with its own package manager. Noxs does NOT pretend it is a Debian rootfs.
- * Integration is detection-based: if the Termux app is present Noxs reports
- * external integration; otherwise it is honestly unavailable.
- */
-class TermuxProvider(private val isTermuxAppInstalled: Boolean) : EnvironmentProvider {
-    override val id = "termux"
-    override val displayName = "Termux"
-    override val description = "Android-native terminal"
-
-    override fun capabilities(): Set<EnvironmentCapability> =
-        if (isTermuxAppInstalled) setOf(
-            EnvironmentCapability.TERMINAL, EnvironmentCapability.PACKAGE_MANAGER
-        ) else emptySet()
-
-    override fun variants(): List<EnvironmentVariant> = emptyList()
-
-    override fun checkCompatibility(device: DeviceProfile): CompatibilityReport {
-        val integration = when {
-            isTermuxAppInstalled -> CompatibilityCheck(
-                "Termux app", true, "external integration — pkg available inside Termux")
-            else -> CompatibilityCheck(
-                "Termux app", false, "not installed — install Termux from F-Droid first")
-        }
-        val level = if (isTermuxAppInstalled) CompatibilityLevel.LIMITED else CompatibilityLevel.UNSUPPORTED
-        return CompatibilityReport(
-            level = level,
-            checks = listOf(
-                integration,
-                CompatibilityCheck("Noxs integration mode", null,
-                    if (isTermuxAppInstalled) "external (Termux runs its own userspace)"
-                    else "unavailable"),
-                CompatibilityCheck("Rootfs install", false,
-                    "Termux is not a Debian root filesystem — Noxs does not fake one (spec §24)")
-            ),
-            reasons = if (isTermuxAppInstalled) emptyList()
-            else listOf("Termux app is not installed on this device")
-        )
-    }
-
-    override fun canInstall(device: DeviceProfile): Boolean = false
-}
+// NOTE: Noxs ships exactly ONE environment — Debian 12 (bookworm). The
+// experimental multi-OS providers (Ubuntu, Kali, Arch, Parrot, Termux) were
+// removed: one proven environment, one install path, no variant matrix to
+// maintain. ProviderRegistry keeps the discovery seam so a future second
+// environment can be added deliberately.
 
 // ------------------------------------------------------------------ registry
 
@@ -355,12 +108,7 @@ class TermuxProvider(private val isTermuxAppInstalled: Boolean) : EnvironmentPro
 object ProviderRegistry {
 
     fun createAll(termuxInstalled: Boolean): List<EnvironmentProvider> = listOf(
-        DebianProvider(),
-        UbuntuProvider(),
-        TermuxProvider(termuxInstalled),
-        KaliNetHunterProvider(),
-        ArchProvider(),
-        ParrotProvider()
+        DebianProvider()
     )
 
     fun findById(providers: List<EnvironmentProvider>, id: String): EnvironmentProvider? =

@@ -23,7 +23,6 @@ SHELL_CONSTANTS = {
     "PKG_DEV": ("NoxsNxPkgDev.kt", "linux-runtime/nx/pkg-dev.sh"),
     "PKG_INSTALL": ("NoxsNxPkgInstall.kt", "linux-runtime/nx/pkg-install.sh"),
     "WEB_LIB": ("NoxsNxWebTemplate.kt", "linux-runtime/nx/web-lib.sh"),
-    "ENV_LIB": ("NoxsNxEnvLib.kt", "linux-runtime/nx/env-lib.sh"),
     "VPN_LIB": ("NoxsNxVpnLib.kt", "linux-runtime/nx/vpn-lib.sh"),
     "PLUG_LIB": ("NoxsNxPlugLib.kt", "linux-runtime/nx/plug-lib.sh"),
     "CERT_FIX_LIB": ("NoxsNxCertFix.kt", "linux-runtime/nx/cert-fix.sh"),

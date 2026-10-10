@@ -213,20 +213,18 @@ class NoxsEnvironmentManager(private val context: Context) {
 
     fun terminalProfile(id: String): TerminalProfile? {
         val env = environmentFor(id) ?: return null
-        return when (val provider = providers.firstOrNull { it.id == env.providerId }) {
-            is com.crossberry.noxs.environments.providers.RootfsTarballProvider ->
-                provider.terminalProfile(env)
-            else -> TerminalProfile(
-                environmentId = env.id,
-                displayName = env.displayName,
-                shell = "/bin/bash",
-                user = "noxs",
-                home = "/home/noxs",
-                workingDirectory = "/home/noxs",
-                environmentVariables = mapOf("NOXS" to "1"),
-                promptHost = if (env.storagePath == legacyPaths.base.absolutePath) "android" else "debian"
-            )
-        }
+        // One environment: the Debian profile (legacy imports keep the
+        // "android" prompt host so pre-multi-env installs stay unchanged).
+        return TerminalProfile(
+            environmentId = env.id,
+            displayName = env.displayName,
+            shell = "/bin/bash",
+            user = "noxs",
+            home = "/home/noxs",
+            workingDirectory = "/home/noxs",
+            environmentVariables = mapOf("NOXS" to "1"),
+            promptHost = if (env.storagePath == legacyPaths.base.absolutePath) "android" else "debian"
+        )
     }
 
     fun activePackageManager(): PackageManagerKind {

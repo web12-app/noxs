@@ -173,7 +173,6 @@ object RootfsConfigurator {
             "pkg-dev.sh" to NoxsNxPkgDev.PKG_DEV,
             "pkg-install.sh" to NoxsNxPkgInstall.PKG_INSTALL,
             "web-lib.sh" to NoxsNxWebTemplate.WEB_LIB,
-            "env-lib.sh" to NoxsNxEnvLib.ENV_LIB,
             "vpn-lib.sh" to NoxsNxVpnLib.VPN_LIB,
             "plug-lib.sh" to NoxsNxPlugLib.PLUG_LIB,
             "cert-fix.sh" to NoxsNxCertFix.CERT_FIX_LIB,
@@ -259,14 +258,28 @@ object RootfsConfigurator {
             }
         }
         installNxPackageSystem(rootfs)
+        // Migration cleanups: retired guest lib files (nx env removal).
+        val libDir = File(rootfs, "usr/local/lib/noxs-pkg")
+        RETIRED_LIB_FILES.forEach { name ->
+            val stale = File(libDir, name)
+            if (stale.isFile && !stale.delete()) {
+                NoxsLog.w("RootfsConfig", "migration could not delete stale lib $name")
+            }
+        }
     }
 
-    // 5: adds env-lib.sh (nx env Multi-Env Manager CLI) to existing environments
+    // 5: added env-lib.sh (nx env Multi-Env Manager CLI) — REMOVED in 9
     // 6: adds vpn-lib.sh (nx vpn Tor over PRoot) to existing environments
     // 7: adds plug-lib.sh (nx plug Noxs Plugin Store) to existing environments
     // 8: adds cert-fix.sh (nx cert-fix — APT/CA repair + curl/wget provisioning)
+    // 9: removes env-lib.sh + the `nx env` dispatcher (multi-OS environments
+    //    retired; Debian 12 is the one environment). The migration deletes
+    //    the stale guest lib so no orphan script lingers on existing installs.
     // internal: asserted from unit tests (NoxsNxAiTest migration marker check)
-    internal val NX_PACKAGE_SYSTEM_VERSION = "8"
+    internal val NX_PACKAGE_SYSTEM_VERSION = "9"
+
+    /** Guest lib files removed by a migration version — deleted on update. */
+    private val RETIRED_LIB_FILES = listOf("env-lib.sh")
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

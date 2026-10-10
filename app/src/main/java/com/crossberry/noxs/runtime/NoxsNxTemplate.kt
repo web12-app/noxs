@@ -29,7 +29,6 @@ object NoxsNxTemplate {
 #   nx remove <package>
 #   nx ow <url>          Open a URL in the Noxs floating browser window
 #   nx ai [task]         Noxs AI Agent Terminal (interactive or one-shot)
-#   nx env <cmd>         Multi-Env Manager (list / install / remove / use)
 #   nx vpn <cmd>         Tor over PRoot (VPN mode)
 #   nx plug <cmd>        Noxs Plugin Store (open / search / install / ...)
 #   nx cert-fix          Repair APT sources, CA certificates, install curl/wget
@@ -69,12 +68,6 @@ Install commands:
 Web:
   nx ow <url>                          Open a URL in the Noxs browser window
 
-Environments (Multi-Env Manager):
-  nx env list                          Installed environments + providers
-  nx env install <provider> [variant]  Install another Linux environment
-  nx env remove <id>                   Remove an installed environment
-  nx env use <id>                      Set the active environment
-
 VPN (Tor):
   nx vpn                              Install (if needed) + activate Tor
   nx vpn stop|status|test             Manage the Tor daemon
@@ -99,7 +92,7 @@ Maintenance:
 All noxs commands are also allowed here (nx <command> == noxs <command>):
   nx docker install | nx code start | nx storage status | nx help
 
-Run 'nx pkg', 'nx install', 'nx ow' or 'nx env' without arguments for
+Run 'nx pkg', 'nx install' or 'nx ow' without arguments for
 command-specific help.
 EOF
 }
@@ -173,13 +166,6 @@ case "§{1:-}" in
         # shellcheck source=/dev/null
         . "§NX_LIB_DIR/web-lib.sh"
         nx_ow_cmd "§@"
-        ;;
-    env)
-        shift                       # drop "env", forward the subcommand
-        # Multi-Env Manager: list / install / remove / use environments.
-        # shellcheck source=/dev/null
-        . "§NX_LIB_DIR/env-lib.sh"
-        nx_env_cmd "§@"
         ;;
     vpn)
         shift                       # drop "vpn", forward the subcommand
