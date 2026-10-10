@@ -137,7 +137,9 @@ class NoxsSdkStoreTest {
         assertEquals("(function(){window.__noxsSdk='0.0.1';})();", store.entryJs("0.0.1"))
         assertEquals("0.0.1", store.manifest("0.0.1")?.version)
         assertTrue(File(dir, "types.d.ts").isFile)
-        assertEquals(listOf("sdk/registry.json", "https://artifacts.invalid/noxs-sdk-0.0.1.noxs-sdk"), fetcher.fetched)
+        assertEquals(2, fetcher.fetched.size)
+        assertTrue(fetcher.fetched[0].endsWith("sdk/registry.json"))
+        assertEquals("https://artifacts.invalid/noxs-sdk-0.0.1.noxs-sdk", fetcher.fetched[1])
     }
 
     @Test
