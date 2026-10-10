@@ -614,7 +614,7 @@ class PluginCardAdapter(
         context: android.content.Context,
         dp: Float,
         text: String,
-        background: Int,
+        bgColor: Int,
         foreground: Int
     ): TextView = TextView(context).apply {
         this.text = text
@@ -624,7 +624,7 @@ class PluginCardAdapter(
         setPadding((6 * dp).toInt(), (2 * dp).toInt(), (6 * dp).toInt(), (2 * dp).toInt())
         background = GradientDrawable().apply {
             cornerRadius = 8f * dp
-            setColor(background)
+            setColor(bgColor)
         }
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT

@@ -52,7 +52,7 @@ object NoxsPluginRuntime {
         val pluginId: String,
         val permissions: Set<String>,
         val webView: WebView,
-        val storageFile: File?
+        val storageFile: java.io.File?
     )
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -245,7 +245,7 @@ object NoxsPluginRuntime {
                 PluginStorageFile.store(file, data - safeKey)
                 "\"ok\""
             }
-            "keys" -> JSONObject(data.keys.toList()).toString()
+            "keys" -> org.json.JSONArray(data.keys.toList()).toString()
             else -> null
         }
     }
