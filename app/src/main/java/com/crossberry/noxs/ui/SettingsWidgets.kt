@@ -172,10 +172,10 @@ object SettingsWidgets {
             }
         }
 
-    private fun switch(context: Context, checked: Boolean, contentDescription: String): SwitchCompat =
+    private fun switch(context: Context, checked: Boolean, label: String): SwitchCompat =
         SwitchCompat(context).apply {
             isChecked = checked
-            contentDescription = contentDescription
+            contentDescription = label
             // Green active switch, gray inactive track (spec §1).
             trackTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
@@ -357,21 +357,21 @@ object SettingsWidgets {
                 setPadding(0, dp(context, 2), 0, dp(context, 6))
             })
         }
-        column.addView(android.widget.SeekBar(context).apply {
-            max = (max - min) / step
-            progress = (value.coerceIn(min, max) - min) / step
-            contentDescription = contentDescription
-            setPadding(dp(context, 8), 0, dp(context, 8), 0)
-            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
-                    if (!fromUser) return
-                    val next = (min + progress * step).coerceIn(min, max)
-                    onChange(next)
-                }
-                override fun onStartTrackingTouch(bar: android.widget.SeekBar) {}
-                override fun onStopTrackingTouch(bar: android.widget.SeekBar) {}
-            })
+        val seek = android.widget.SeekBar(context)
+        seek.max = (max - min) / step
+        seek.progress = (value.coerceIn(min, max) - min) / step
+        seek.contentDescription = contentDescription
+        seek.setPadding(dp(context, 8), 0, dp(context, 8), 0)
+        seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val next = (min + progress * step).coerceIn(min, max)
+                onChange(next)
+            }
+            override fun onStartTrackingTouch(bar: android.widget.SeekBar) {}
+            override fun onStopTrackingTouch(bar: android.widget.SeekBar) {}
         })
+        column.addView(seek)
         val bounds = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         bounds.addView(TextView(context).apply {
             text = format(min)
