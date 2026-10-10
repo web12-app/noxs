@@ -51,7 +51,7 @@ class EnvironmentInstallActivity : AppCompatActivity() {
 
     private var providerId: String = ""
     private var variantId: String = ""
-    private var passwordAsked = false
+    @Volatile private var passwordAsked = false
 
     @Suppress("MissingInflatedId")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -156,14 +156,37 @@ class EnvironmentInstallActivity : AppCompatActivity() {
         )
     }
 
-    /** Masked in-memory password dialog (spec §30): returned array is zeroed by the caller. */
+    /**
+     * Masked in-memory password dialog (spec §30): returned array is zeroed by
+     * the caller. The setup thread blocks on a latch while the main thread owns
+     * the dialog. The install keeps running app-side, so the screen may already
+     * be finished when the setup thread reaches the password step — showing a
+     * dialog on a dead activity window token crashes the whole app
+     * (WindowManager$BadTokenException), so the prompt is skipped and the task
+     * fails gracefully instead ("a Noxs password is required").
+     */
     @Volatile private var pendingPassword: CharArray? = null
+    @Volatile private var passwordDialog: AlertDialog? = null
+    @Volatile private var passwordLatch: java.util.concurrent.CountDownLatch? = null
+    private val passwordResolved = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** First resolution wins; never double-counts the latch. */
+    private fun resolvePassword(value: CharArray?, latch: java.util.concurrent.CountDownLatch) {
+        if (!passwordResolved.compareAndSet(false, true)) return
+        pendingPassword = value
+        latch.countDown()
+    }
 
     private fun askPasswordBlocking(): CharArray? {
         if (passwordAsked) return pendingPassword
         passwordAsked = true
         val latch = java.util.concurrent.CountDownLatch(1)
+        passwordLatch = latch
         runOnUiThread {
+            if (isFinishing || isDestroyed || passwordResolved.get()) {
+                resolvePassword(null, latch)
+                return@runOnUiThread
+            }
             val input = EditText(this).apply {
                TransformationMethodHelper.applyPassword(this)
                 hint = getString(R.string.env_password_hint)
@@ -177,21 +200,21 @@ class EnvironmentInstallActivity : AppCompatActivity() {
                 textSize = 14f
             })
             box.addView(input)
-            AlertDialog.Builder(this)
+            passwordDialog = AlertDialog.Builder(this)
                 .setTitle(getString(R.string.env_password_title))
                 .setView(box)
                 .setPositiveButton(android.R.string.ok) { _, _ ->
-                    pendingPassword = input.text?.toString()?.toCharArray()
-                    latch.countDown()
+                    resolvePassword(input.text?.toString()?.toCharArray(), latch)
                 }
                 .setNegativeButton(android.R.string.cancel) { _, _ ->
-                    pendingPassword = null
-                    latch.countDown()
+                    resolvePassword(null, latch)
                 }
                 .setCancelable(false)
                 .show()
         }
         latch.await()
+        passwordLatch = null
+        passwordDialog = null
         return pendingPassword
     }
 
@@ -412,6 +435,14 @@ class EnvironmentInstallActivity : AppCompatActivity() {
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
+        // If the password prompt is still open (or posted but not yet shown),
+        // release the blocked setup thread with "no password" and dismiss the
+        // dialog on the main thread — prevents both the BadTokenException crash
+        // and a setup thread waiting forever on the latch.
+        passwordAsked = true
+        passwordDialog?.dismiss()
+        passwordDialog = null
+        passwordLatch?.let { resolvePassword(null, it) }
         scope.cancel()
         super.onDestroy()
     }
