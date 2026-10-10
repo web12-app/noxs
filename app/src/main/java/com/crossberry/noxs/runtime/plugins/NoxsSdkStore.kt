@@ -453,10 +453,10 @@ class PluginStateStore(private val noxsDir: File) {
                 when (ch) {
                     '\\' -> append(BACKSLASH).append(BACKSLASH)
                     '"' -> append(BACKSLASH).append('"')
-                    '\n' -> append("\n")
-                    '\r' -> append("\r")
-                    '\t' -> append("\t")
-                    '\b' -> append("\b")
+                    '\n' -> append("\\n")
+                    '\r' -> append("\\r")
+                    '\t' -> append("\\t")
+                    '\b' -> append("\\b")
                     '\u000C' -> append(BACKSLASH).append('f')
                     else ->
                         if (ch < ' ') append("\\u%04x".format(ch.code)) else append(ch)

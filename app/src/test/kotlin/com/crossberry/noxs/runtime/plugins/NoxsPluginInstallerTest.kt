@@ -447,7 +447,7 @@ class NoxsPluginInstallerTest {
     fun `a plugin requiring a newer sdk is refused before download`() {
         val (installer, root) = installer(appVersion = "0.12.0")
         val error = try {
-            installer.install(entry().copy(minimumSdkVersion = "0.0.2"))
+            installer.install(entry().copy(sdkVersion = "0.0.2"))
             null
         } catch (e: NoxsPluginInstaller.InstallException) {
             e

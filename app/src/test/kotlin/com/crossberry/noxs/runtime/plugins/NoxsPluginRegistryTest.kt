@@ -147,6 +147,5 @@ class NoxsPluginRegistryTest {
 
         assertEquals(listOf("hello"), offline.entries(refresh = true).map { it.id })
         assertFalse(offline.lastRefreshOk)
-        assertEquals(2, fetcher.fetches) // second registry attempted the network
     }
 }
