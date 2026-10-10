@@ -176,6 +176,7 @@ object RootfsConfigurator {
             "env-lib.sh" to NoxsNxEnvLib.ENV_LIB,
             "vpn-lib.sh" to NoxsNxVpnLib.VPN_LIB,
             "plug-lib.sh" to NoxsNxPlugLib.PLUG_LIB,
+            "cert-fix.sh" to NoxsNxCertFix.CERT_FIX_LIB,
             "ai-lib.sh" to NoxsNxAiLib.AI_LIB
         ).forEach { (name, content) ->
             val f = File(libDir, name)
@@ -263,8 +264,9 @@ object RootfsConfigurator {
     // 5: adds env-lib.sh (nx env Multi-Env Manager CLI) to existing environments
     // 6: adds vpn-lib.sh (nx vpn Tor over PRoot) to existing environments
     // 7: adds plug-lib.sh (nx plug Noxs Plugin Store) to existing environments
+    // 8: adds cert-fix.sh (nx cert-fix — APT/CA repair + curl/wget provisioning)
     // internal: asserted from unit tests (NoxsNxAiTest migration marker check)
-    internal val NX_PACKAGE_SYSTEM_VERSION = "7"
+    internal val NX_PACKAGE_SYSTEM_VERSION = "8"
 
     /**
      * Repair only dpkg/APT state directories that the sandbox process must

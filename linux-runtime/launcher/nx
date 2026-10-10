@@ -17,6 +17,7 @@
 #   nx env <cmd>         Multi-Env Manager (list / install / remove / use)
 #   nx vpn <cmd>         Tor over PRoot (VPN mode)
 #   nx plug <cmd>        Noxs Plugin Store (open / search / install / ...)
+#   nx cert-fix          Repair APT sources, CA certificates, install curl/wget
 #
 # Every other command is forwarded to the noxs CLI, so all noxs commands
 # are allowed through nx as well:
@@ -75,6 +76,10 @@ Plugin Store:
 AI:
   nx ai                                Interactive Noxs AI Agent (nx@ai>)
   nx ai "task"                         One-shot task, then exit
+
+Maintenance:
+  nx cert-fix                          Repair APT + CA certificates; install
+                                       curl and wget into the environment
 
 All noxs commands are also allowed here (nx <command> == noxs <command>):
   nx docker install | nx code start | nx storage status | nx help
@@ -182,6 +187,16 @@ case "${1:-}" in
         # shellcheck source=/dev/null
         . "$NX_LIB_DIR/ai-lib.sh"
         nx_ai_cmd "$@"
+        ;;
+    cert-fix)
+        shift                       # drop "cert-fix"
+        # APT + CA certificate repair from inside the guest: signed-HTTP
+        # fallback for apt-get update, CA bundle regeneration, curl/wget
+        # provisioning. Helps installs whose app-side bootstrap never
+        # completed — no app update or environment reinstall required.
+        # shellcheck source=/dev/null
+        . "$NX_LIB_DIR/cert-fix.sh"
+        cert_fix_cmd "$@"
         ;;
     install)
         shift                       # drop "install" — it is NOT a package name
