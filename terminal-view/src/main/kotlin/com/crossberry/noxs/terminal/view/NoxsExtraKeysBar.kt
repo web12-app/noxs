@@ -1,7 +1,7 @@
 /*
  * Noxs terminal-view — two-row, Termux-style terminal key strip with modifier
- * latches. Core navigation keys stay evenly spaced; legacy quick keys remain
- * reachable by horizontal scrolling the second row.
+ * latches. Row layout: ESC TAB / - HOME ↑ END and CTRL ALT ← ↓ → PGUP PGDN;
+ * legacy quick keys remain reachable by horizontal scrolling the first row.
  */
 package com.crossberry.noxs.terminal.view
 
@@ -25,6 +25,18 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : LinearLayout(context, attrs) {
 
+    private companion object {
+        // Noxs design system (kept literal: this module has no app resources).
+        private val PANEL = 0xFF111111.toInt()
+        private val KEY = 0xFF222222.toInt()
+        private val KEY_BORDER = 0xFF303030.toInt()
+        private val KEY_TEXT = 0xFFFFFFFF.toInt()
+        private val ACCENT = 0xFF20D866.toInt()
+        private val ON_ACCENT = 0xFF04150A.toInt()
+        private const val CORE_COLUMNS = 7
+        private const val KEY_GAP_DP = 4
+    }
+
     private val firstRow = LinearLayout(context).apply {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -42,35 +54,32 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(Color.BLACK)
-        setPadding(0, dp(3), 0, dp(3))
+        setBackgroundColor(PANEL)
+        setPadding(dp(4), dp(4), dp(4), dp(4))
         addView(firstRowScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         addView(secondRowScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
-        // Primary keys mirror the compact two-row terminal layout in the
-        // reference screenshot. Each group of seven fills the available width.
+        // Row 1 — required core keys; convenience keys scroll into view.
         addKey(firstRow, "ESC") { terminalView?.sendBytes(byteArrayOf(0x1b)) }
+        addKey(firstRow, "TAB") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_TAB) }
         addKey(firstRow, "/") { terminalView?.sendBytes("/".toByteArray()) }
         addKey(firstRow, "-") { terminalView?.sendBytes("-".toByteArray()) }
         addKey(firstRow, "HOME") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_MOVE_HOME) }
         addKey(firstRow, "↑") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_DPAD_UP) }
         addKey(firstRow, "END") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_MOVE_END) }
-        addKey(firstRow, "PGUP") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_PAGE_UP) }
+        addKey(firstRow, "^C") { terminalView?.sendBytes(byteArrayOf(0x03)) }
+        addKey(firstRow, "^L") { terminalView?.sendBytes(byteArrayOf(0x0c)) }
+        addKey(firstRow, "|") { terminalView?.sendBytes("|".toByteArray()) }
+        addKey(firstRow, "~") { terminalView?.sendBytes("~".toByteArray()) }
 
-        addKey(secondRow, "⇥") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_TAB) }
+        // Row 2 — modifiers latch for the next key press.
         addLatch(secondRow, "CTRL")
         addLatch(secondRow, "ALT")
         addKey(secondRow, "←") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_DPAD_LEFT) }
         addKey(secondRow, "↓") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_DPAD_DOWN) }
         addKey(secondRow, "→") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_DPAD_RIGHT) }
+        addKey(secondRow, "PGUP") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_PAGE_UP) }
         addKey(secondRow, "PGDN") { terminalView?.sendSpecialKey(KeyEvent.KEYCODE_PAGE_DOWN) }
-
-        // Keep the prior convenience keys without crowding the seven main
-        // columns; they are available by swiping the lower row horizontally.
-        addKey(secondRow, "^C") { terminalView?.sendBytes(byteArrayOf(0x03)) }
-        addKey(secondRow, "^L") { terminalView?.sendBytes(byteArrayOf(0x0c)) }
-        addKey(secondRow, "|") { terminalView?.sendBytes("|".toByteArray()) }
-        addKey(secondRow, "~") { terminalView?.sendBytes("~".toByteArray()) }
     }
 
     private fun horizontalRow(row: LinearLayout) = HorizontalScrollView(context).apply {
@@ -83,7 +92,8 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w <= 0) return
-        val keyWidth = ((w - paddingLeft - paddingRight) / 7).coerceAtLeast(dp(42))
+        val gaps = dp(KEY_GAP_DP) * (CORE_COLUMNS - 1)
+        val keyWidth = ((w - paddingLeft - paddingRight - gaps) / CORE_COLUMNS).coerceAtLeast(dp(44))
         coreButtons.forEach { button ->
             val lp = button.layoutParams as? LinearLayout.LayoutParams ?: return@forEach
             if (lp.width != keyWidth) {
@@ -98,7 +108,7 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
             setOnClickListener { action() }
         }
         coreButtons += button
-        row.addView(button, LinearLayout.LayoutParams(dp(48), LayoutParams.MATCH_PARENT))
+        attach(row, button)
         return button
     }
 
@@ -114,17 +124,23 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
         }
         latchButtons[label] = button
         coreButtons += button
-        row.addView(button, LinearLayout.LayoutParams(dp(48), LayoutParams.MATCH_PARENT))
+        attach(row, button)
+    }
+
+    private fun attach(row: LinearLayout, button: Button) {
+        row.addView(button, LinearLayout.LayoutParams(dp(48), LayoutParams.MATCH_PARENT).apply {
+            marginEnd = dp(KEY_GAP_DP)
+        })
     }
 
     private fun makeButton(label: String, latched: Boolean): Button = Button(context).apply {
         text = label
-        textSize = if (label.length >= 4) 13f else 15f
+        textSize = if (label.length >= 4) 12.5f else 14f
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         isAllCaps = false
         isSingleLine = true
         gravity = Gravity.CENTER
-        setTextColor(if (latched) Color.BLACK else Color.WHITE)
+        setTextColor(if (latched) ON_ACCENT else KEY_TEXT)
         minWidth = 0
         minimumWidth = 0
         minHeight = 0
@@ -139,20 +155,21 @@ class NoxsExtraKeysBar @JvmOverloads constructor(
         val tv = terminalView ?: return
         latchButtons["CTRL"]?.let { button ->
             button.background = keyBackground(tv.ctrlLatch)
-            button.setTextColor(if (tv.ctrlLatch) Color.BLACK else Color.WHITE)
+            button.setTextColor(if (tv.ctrlLatch) ON_ACCENT else KEY_TEXT)
         }
         latchButtons["ALT"]?.let { button ->
             button.background = keyBackground(tv.altLatch)
-            button.setTextColor(if (tv.altLatch) Color.BLACK else Color.WHITE)
+            button.setTextColor(if (tv.altLatch) ON_ACCENT else KEY_TEXT)
         }
     }
 
     private fun keyBackground(latched: Boolean): RippleDrawable {
         val shape = GradientDrawable().apply {
-            cornerRadius = dp(8).toFloat()
-            setColor(if (latched) Color.WHITE else Color.TRANSPARENT)
+            cornerRadius = dp(7).toFloat()
+            setColor(if (latched) ACCENT else KEY)
+            if (!latched) setStroke(dp(1), KEY_BORDER)
         }
-        return RippleDrawable(ColorStateList.valueOf(0x33ffffff), shape, null)
+        return RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), shape, null)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

@@ -22,12 +22,12 @@ import androidx.core.content.ContextCompat
 
 object SettingsWidgets {
 
-    // Noxs palette (matches res/colors)
-    private const val TEXT = 0xffe6e6e6.toInt()
-    private const val TEXT_DIM = 0xff8a93a0.toInt()
-    private const val ACCENT = 0xff3ddc84.toInt()
-    private const val SURFACE = 0xff141a24.toInt()
-    private const val SURFACE_ALT = 0xff232a35.toInt()
+    // Noxs design system palette (mirrors res/values/colors.xml)
+    private const val TEXT = 0xffffffff.toInt()
+    private const val TEXT_DIM = 0xffaaaaaa.toInt()
+    private const val ACCENT = 0xff20d866.toInt()
+    private const val SURFACE = 0xff111111.toInt()
+    private const val SURFACE_ALT = 0xff222222.toInt()
 
     fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 

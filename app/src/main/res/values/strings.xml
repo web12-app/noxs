@@ -530,4 +530,30 @@
     <string name="plugin_details_readme_missing">No README is published for this plugin yet.</string>
     <string name="title_plugin_window">Plugin window</string>
 
+    <!-- Header / session state (UI redesign) -->
+    <string name="state_running">RUNNING</string>
+    <string name="state_idle">IDLE</string>
+    <string name="state_exited">EXITED</string>
+    <string name="state_failed">FAILED</string>
+    <string name="header_more">Header options</string>
+    <string name="header_show_stats">Show storage and session details</string>
+    <string name="header_hide_stats">Hide stats details</string>
+    <string name="session_close_confirm_title">Close session?</string>
+    <string name="session_close_confirm_msg">Close %1$s? The shell and anything running inside it will be terminated.</string>
+    <string name="drawer_new_shell">New Shell</string>
+    <string name="drawer_new_root">Root Sandbox</string>
+    <string name="nav_terminal">Terminal</string>
+    <string name="terminal_menu_session_settings">Session settings</string>
+    <string name="terminal_font_size_value">Font size: %1$d sp</string>
+
+    <!-- Settings sections (UI redesign) -->
+    <string name="settings_section_appearance">APPEARANCE</string>
+    <string name="settings_section_performance">PERFORMANCE</string>
+    <string name="settings_section_session">SESSION</string>
+    <string name="settings_section_network">BOOTSTRAP &amp; NETWORK</string>
+    <string name="settings_header_stats">Show CPU and memory in header</string>
+    <string name="settings_header_stats_desc">Live resource usage next to the session name</string>
+    <string name="settings_dark_theme">Dark theme</string>
+    <string name="settings_dark_theme_desc">Noxs uses one high-contrast dark theme across the app</string>
+
 </resources>

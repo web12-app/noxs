@@ -10,7 +10,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -28,6 +27,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.GravityCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -145,7 +145,8 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.btnNewSession.setOnClickListener { newSession(root = false) }
         binding.btnNewRoot.setOnClickListener { newSession(root = true) }
 
-        // Visible Action Bar buttons
+        // Visible action bar: primary actions; everything else lives in the
+        // overflow menus so buttons never clip on narrow screens.
         binding.btnActionNewShell.setOnClickListener { newSession(root = false) }
         binding.btnActionNewRoot.setOnClickListener { newSession(root = true) }
         binding.btnActionActivity.setOnClickListener { startActivity(Intent(this, ActivityCenterActivity::class.java)) }
@@ -158,13 +159,14 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         }
         binding.btnActionCopy.setOnClickListener { copyTerminalText() }
         binding.btnActionPaste.setOnClickListener { pasteIntoShell() }
-        binding.btnActionClear.setOnClickListener { clearTerminal() }
-        binding.btnActionPackages.setOnClickListener { startActivity(Intent(this, PackageManagerActivity::class.java)) }
-        binding.btnActionFiles.setOnClickListener { startActivity(Intent(this, FileBrowserActivity::class.java)) }
-        binding.btnActionServices.setOnClickListener { startActivity(Intent(this, ServiceManagerActivity::class.java)) }
-        binding.btnActionProcesses.setOnClickListener { startActivity(Intent(this, ProcessManagerActivity::class.java)) }
-        binding.btnActionSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        binding.btnActionDiagnostics.setOnClickListener { startActivity(Intent(this, DiagnosticsActivity::class.java)) }
+        binding.btnActionMore.setOnClickListener { showActionsMenu(it) }
+        binding.btnHeaderMore.setOnClickListener { showHeaderMenu(it) }
+        applyHeaderStatsVisibility()
+
+        // Drawer: stay on the terminal
+        binding.navTerminal.setOnClickListener {
+            binding.drawer.closeDrawer(GravityCompat.START)
+        }
 
         // Drawer: managers
         val routes = mapOf(
@@ -198,9 +200,8 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.btnTerminalLatest.setOnClickListener { binding.terminal.scrollToBottom() }
         binding.extraKeys.terminalView = binding.terminal
 
-        // Terminal UX upgrade: persisted settings, toolbar, search, indicator
+        // Terminal UX upgrade: persisted settings, search, indicator
         applyTerminalSettings()
-        wireTerminalToolbar()
         wireSearchBar()
         binding.terminal.onToggleFullscreen = { toggleFullscreen() }
         binding.terminal.onIndicatorChanged = { label ->
@@ -388,6 +389,9 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     /** Ctrl+F toggles between the normal chrome and an immersive terminal. */
     private var fullscreenMode = false
 
+    /** Secondary statistics row expanded via the header overflow menu. */
+    private var statsRowExpanded = false
+
     private fun toggleFullscreen() {
         fullscreenMode = !fullscreenMode
         applyFullscreenUi()
@@ -401,11 +405,12 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
     private fun applyFullscreenUi() {
         val chrome = if (fullscreenMode) View.GONE else View.VISIBLE
         binding.statusBar.visibility = chrome
-        binding.actionsScroll.visibility = chrome
+        binding.statsExpanded.visibility =
+            if (!fullscreenMode && statsRowExpanded) View.VISIBLE else View.GONE
         binding.sessionTabsScroll.visibility = chrome
-        // Full screen hides the optional toolbar; normal mode restores it
+        // Full screen always hides the action toolbar; normal mode restores it
         // exactly when the user enabled it in settings.
-        binding.terminalToolbarScroll.visibility =
+        binding.actionsScroll.visibility =
             if (!fullscreenMode && terminalSettings.showToolbar) View.VISIBLE else View.GONE
         binding.extraKeys.visibility = chrome
         WindowCompat.setDecorFitsSystemWindows(window, !fullscreenMode)
@@ -445,24 +450,95 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.terminal.applyAppearance(terminalSettings.toAppearance())
         binding.terminal.onFontSizeChanged = { sp ->
             TerminalSettingsStore.putInt(AndroidTerminalPrefs.from(this), "terminal.fontSize", sp.toInt())
-            binding.fontSizeLabel.text = "${sp.toInt()}"
         }
-        binding.fontSizeLabel.text = "${terminalSettings.fontSizeSp}"
-        binding.terminalToolbarScroll.visibility =
+        binding.actionsScroll.visibility =
             if (terminalSettings.showToolbar) View.VISIBLE else View.GONE
         current?.session?.let { runCatching { it.emulator.setScrollbackLimit(terminalSettings.scrollbackLines) } }
     }
 
-    private fun wireTerminalToolbar() {
-        binding.btnScrollTop.setOnClickListener { binding.terminal.scrollToTop() }
-        binding.btnScrollBottom.setOnClickListener { binding.terminal.scrollToBottom() }
-        binding.btnTbCopy.setOnClickListener { copyTerminalText() }
-        binding.btnTbPaste.setOnClickListener { pasteIntoShell() }
-        binding.btnTbSearch.setOnClickListener { toggleSearchBar() }
-        binding.btnFontDecr.setOnClickListener { binding.terminal.nudgeFontSize(-1f) }
-        binding.btnFontIncr.setOnClickListener { binding.terminal.nudgeFontSize(1f) }
-        binding.fontSizeLabel.setOnClickListener { binding.terminal.resetFontSize() }
-        binding.btnTbMore.setOnClickListener { showTerminalMoreMenu(it) }
+    /** Performance setting: hide live CPU/RAM from the header when disabled. */
+    private fun applyHeaderStatsVisibility() {
+        val show = getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .getBoolean(PREF_HEADER_STATS, true)
+        binding.statusCpu.visibility = if (show) View.VISIBLE else View.GONE
+        binding.statusMem.visibility = if (show) View.VISIBLE else View.GONE
+        if (!show) {
+            statsRowExpanded = false
+            binding.statsExpanded.visibility = View.GONE
+        }
+    }
+
+    /** Toolbar overflow: secondary terminal actions + remaining destinations. */
+    private fun showActionsMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, MORE_CLEAR_TERMINAL, 0, getString(R.string.action_clear))
+        popup.menu.add(0, MORE_CLEAR_SCROLLBACK, 1, getString(R.string.terminal_menu_clear_scrollback))
+        popup.menu.add(0, MORE_SEARCH, 2, getString(R.string.action_search))
+        popup.menu.add(0, MORE_SCROLL_TOP, 3, getString(R.string.terminal_scroll_top))
+        popup.menu.add(0, MORE_SCROLL_BOTTOM, 4, getString(R.string.terminal_scroll_bottom))
+        popup.menu.add(0, MORE_PACKAGES, 5, getString(R.string.nav_packages))
+        popup.menu.add(0, MORE_FILES, 6, getString(R.string.nav_files))
+        popup.menu.add(0, MORE_FONT_INFO, 7, getString(R.string.terminal_font_size_value, terminalSettings.fontSizeSp))
+            .isEnabled = false
+        popup.menu.add(0, MORE_FONT_INCR, 8, getString(R.string.terminal_font_increase))
+        popup.menu.add(0, MORE_FONT_DECR, 9, getString(R.string.terminal_font_decrease))
+        popup.menu.add(0, MORE_RESET_FONT, 10, getString(R.string.terminal_menu_reset_font))
+        popup.menu.add(0, MORE_SAVE_OUTPUT, 11, getString(R.string.terminal_menu_save_output))
+        popup.menu.add(0, MORE_TOGGLE_FULLSCREEN, 12, getString(R.string.terminal_menu_fullscreen))
+        popup.menu.add(0, MORE_SESSION_SETTINGS, 13, getString(R.string.terminal_menu_session_settings))
+        popup.menu.add(0, MORE_SERVICES, 14, getString(R.string.nav_services))
+        popup.menu.add(0, MORE_PROCESSES, 15, getString(R.string.nav_processes))
+        popup.menu.add(0, MORE_DIAGNOSTICS, 16, getString(R.string.nav_diagnostics))
+        popup.menu.add(0, MORE_APP_SETTINGS, 17, getString(R.string.nav_settings))
+        popup.setOnMenuItemClickListener { item -> onActionMenuItem(item.itemId) }
+        popup.show()
+    }
+
+    private fun onActionMenuItem(id: Int): Boolean = when (id) {
+        MORE_CLEAR_TERMINAL -> { clearTerminal(); true }
+        MORE_CLEAR_SCROLLBACK -> { binding.terminal.clearScrollback(); true }
+        MORE_SEARCH -> { openSearchBar(); true }
+        MORE_SCROLL_TOP -> { binding.terminal.scrollToTop(); true }
+        MORE_SCROLL_BOTTOM -> { binding.terminal.scrollToBottom(); true }
+        MORE_PACKAGES -> { startActivity(Intent(this, PackageManagerActivity::class.java)); true }
+        MORE_FILES -> { startActivity(Intent(this, FileBrowserActivity::class.java)); true }
+        MORE_FONT_INCR -> { binding.terminal.nudgeFontSize(1f); true }
+        MORE_FONT_DECR -> { binding.terminal.nudgeFontSize(-1f); true }
+        MORE_RESET_FONT -> { binding.terminal.resetFontSize(); true }
+        MORE_SAVE_OUTPUT -> { saveTerminalOutput(); true }
+        MORE_TOGGLE_FULLSCREEN -> { toggleFullscreen(); true }
+        MORE_SESSION_SETTINGS -> { startActivity(Intent(this, TerminalSettingsActivity::class.java)); true }
+        MORE_SERVICES -> { startActivity(Intent(this, ServiceManagerActivity::class.java)); true }
+        MORE_PROCESSES -> { startActivity(Intent(this, ProcessManagerActivity::class.java)); true }
+        MORE_DIAGNOSTICS -> { startActivity(Intent(this, DiagnosticsActivity::class.java)); true }
+        MORE_APP_SETTINGS -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
+        else -> false
+    }
+
+    /** Header ⋮: expandable statistics + session options. */
+    private fun showHeaderMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        val expanded = binding.statsExpanded.visibility == View.VISIBLE
+        popup.menu.add(
+            0, HEADER_TOGGLE_STATS, 0,
+            getString(if (expanded) R.string.header_hide_stats else R.string.header_show_stats)
+        )
+        popup.menu.add(0, HEADER_CLOSE_SESSION, 1, getString(R.string.drawer_close_session))
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                HEADER_TOGGLE_STATS -> {
+                    statsRowExpanded = !expanded
+                    binding.statsExpanded.visibility = if (statsRowExpanded) View.VISIBLE else View.GONE
+                    true
+                }
+                HEADER_CLOSE_SESSION -> {
+                    current?.let { confirmCloseSession(it) }
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
     }
 
     private fun wireSearchBar() {
@@ -499,41 +575,6 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         binding.terminal.clearSearch()
     }
 
-    private fun showTerminalMoreMenu(anchor: View) {
-        val popup = PopupMenu(this, anchor)
-        popup.menu.add(0, MORE_CLEAR_SCROLLBACK, 0, getString(R.string.terminal_menu_clear_scrollback))
-        popup.menu.add(0, MORE_SAVE_OUTPUT, 1, getString(R.string.terminal_menu_save_output))
-        popup.menu.add(0, MORE_RESET_FONT, 2, getString(R.string.terminal_menu_reset_font))
-        popup.menu.add(0, MORE_TOGGLE_FULLSCREEN, 3, getString(R.string.terminal_menu_fullscreen))
-        popup.menu.add(0, MORE_SETTINGS, 4, getString(R.string.nav_settings))
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                MORE_CLEAR_SCROLLBACK -> {
-                    binding.terminal.clearScrollback()
-                    true
-                }
-                MORE_SAVE_OUTPUT -> {
-                    saveTerminalOutput()
-                    true
-                }
-                MORE_RESET_FONT -> {
-                    binding.terminal.resetFontSize()
-                    true
-                }
-                MORE_TOGGLE_FULLSCREEN -> {
-                    toggleFullscreen()
-                    true
-                }
-                MORE_SETTINGS -> {
-                    startActivity(Intent(this, TerminalSettingsActivity::class.java))
-                    true
-                }
-                else -> false
-            }
-        }
-        popup.show()
-    }
-
     /** Shares the full transcript through the system share sheet. */
     private fun saveTerminalOutput() {
         val text = binding.terminal.selectionOrTranscriptText()
@@ -546,18 +587,56 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
             .onFailure { Toast.makeText(this, R.string.err_generic, Toast.LENGTH_SHORT).show() }
     }
 
-    /** Subtle session/process status: ● RUNNING / ○ IDLE / ✓ EXITED / ✗ FAILED. */
+    /** Subtle session/process status: state chip + optional detail line. */
     private fun renderSessionStatus() {
         val session = current?.session
-        binding.statusProc.text = when {
-            session == null -> ""
+        when {
+            session == null -> {
+                binding.statusState.visibility = View.GONE
+                binding.statusProc.text = ""
+            }
             session.isRunning && session.lastOutputAtMs > 0 &&
-                System.currentTimeMillis() - session.lastOutputAtMs < 10_000L ->
-                getString(R.string.status_proc_running, session.label, session.pid)
-            session.isRunning -> getString(R.string.status_proc_idle, session.label, session.pid)
-            session.exitCode == 0 -> getString(R.string.status_proc_exited, session.exitCode)
-            else -> getString(R.string.status_proc_failed, session.exitCode)
+                System.currentTimeMillis() - session.lastOutputAtMs < 10_000L -> {
+                setStateChip(getString(R.string.state_running), R.color.noxs_accent)
+                binding.statusProc.text = getString(R.string.status_proc_running, session.label, session.pid)
+            }
+            session.isRunning -> {
+                setStateChip(getString(R.string.state_idle), R.color.noxs_text_dim)
+                binding.statusProc.text = getString(R.string.status_proc_idle, session.label, session.pid)
+            }
+            session.exitCode == 0 -> {
+                setStateChip(getString(R.string.state_exited), R.color.noxs_warning)
+                binding.statusProc.text = getString(R.string.status_proc_exited, session.exitCode)
+            }
+            else -> {
+                setStateChip(getString(R.string.state_failed), R.color.noxs_error)
+                binding.statusProc.text = getString(R.string.status_proc_failed, session.exitCode)
+            }
         }
+    }
+
+    private fun setStateChip(label: String, colorRes: Int) {
+        binding.statusState.text = label
+        binding.statusState.setTextColor(ContextCompat.getColor(this, colorRes))
+        binding.statusState.visibility = View.VISIBLE
+        binding.statusDot.setBackgroundResource(colorRes)
+    }
+
+    /** Confirmation before terminating a shell (running or not). */
+    private fun confirmCloseSession(entry: NoxsSessionManager.Entry) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.session_close_confirm_title)
+            .setMessage(getString(R.string.session_close_confirm_msg, entry.label))
+            .setPositiveButton(R.string.action_confirm) { _, _ ->
+                val wasCurrent = current === entry
+                sessionManager?.closeSession(entry)
+                if (wasCurrent) {
+                    current = sessionManager?.sessions?.value?.firstOrNull { it !== entry }
+                    attachCurrent()
+                }
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
     }
 
     private fun copyTerminalText() {
@@ -835,15 +914,10 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
                     binding.drawer.closeDrawer(GravityCompat.START)
                 },
                 onLongClick = {
-                    sessionManager?.closeSession(entry)
-                    if (current === entry) current = list.firstOrNull { it !== entry }
-                    attachCurrent()
+                    confirmCloseSession(entry)
                 }
             )
         })
-        binding.statusDot.setBackgroundResource(
-            if (list.any { it.session.isRunning }) R.color.noxs_ok else R.color.noxs_warn
-        )
         renderSessionTabs(list)
     }
 
@@ -852,38 +926,100 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         row.removeAllViews()
         val dp = getResources().displayMetrics.density
 
-        // 1. Active session tabs
+        // Session chips: root sandbox sessions carry a warning outline + ⌗.
         list.forEach { entry ->
             val isSelected = entry === current
-            val tab = TextView(this).apply {
-                val dot = if (entry.session.isRunning) "● " else "○ "
-                val rootTag = if (entry.loginAsRoot) " [root]" else ""
+            val running = entry.session.isRunning
+            val chip = TextView(this).apply {
+                val dot = if (running) "● " else "○ "
+                val rootTag = if (entry.loginAsRoot) " ⌗" else ""
                 text = "$dot${entry.label}$rootTag"
                 typeface = Typeface.MONOSPACE
                 textSize = 11.5f
-                setTextColor(if (isSelected) Color.BLACK else 0xffe6e6e6.toInt())
+                isSingleLine = true
+                contentDescription = entry.label +
+                    (if (entry.loginAsRoot) " (${getString(R.string.session_root_badge)})" else "") +
+                    (if (running) "" else " · ${getString(R.string.state_exited)}")
+                setTextColor(
+                    when {
+                        isSelected -> ON_ACCENT
+                        !running -> DIM_TEXT
+                        entry.loginAsRoot -> WARN_TEXT
+                        else -> TEXT_WHITE
+                    }
+                )
                 background = GradientDrawable().apply {
-                    cornerRadius = 6f * dp
-                    setColor(if (isSelected) 0xff3ddc84.toInt() else 0xff232a35.toInt())
-                    setStroke((1 * dp).toInt(), if (isSelected) 0xff3ddc84.toInt() else 0xff2f3946.toInt())
+                    cornerRadius = 8f * dp
+                    setColor(if (isSelected) ACCENT else ELEVATED)
+                    setStroke(
+                        (1 * dp).toInt(),
+                        when {
+                            isSelected -> ACCENT
+                            entry.loginAsRoot -> WARN_BORDER
+                            else -> BORDER
+                        }
+                    )
                 }
                 setPadding((10 * dp).toInt(), (4 * dp).toInt(), (10 * dp).toInt(), (4 * dp).toInt())
                 setOnClickListener {
-                    current = entry
-                    attachCurrent()
-                    renderSessionTabs(list)
+                    if (current !== entry) {
+                        current = entry
+                        attachCurrent()
+                        renderSessionTabs(list)
+                    }
                 }
-                setOnLongClickListener {
-                    sessionManager?.closeSession(entry)
-                    true
-                }
+                setOnLongClickListener { confirmCloseSession(entry); true }
             }
-            row.addView(tab, LinearLayout.LayoutParams(
+            row.addView(chip, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = (6 * dp).toInt() })
         }
 
+        // Compact [+] launcher: shell or root sandbox via overflow, so the
+        // two creation options never clip on narrow screens.
+        val add = TextView(this).apply {
+            text = "+"
+            typeface = Typeface.MONOSPACE
+            textSize = 14f
+            gravity = Gravity.CENTER
+            minHeight = (24 * dp).toInt()
+            setTextColor(TEXT_WHITE)
+            contentDescription = getString(R.string.action_new_shell)
+            background = GradientDrawable().apply {
+                cornerRadius = 8f * dp
+                setColor(ELEVATED)
+                setStroke((1 * dp).toInt(), BORDER)
+            }
+            setPadding((11 * dp).toInt(), 0, (11 * dp).toInt(), 0)
+            setOnClickListener { showNewSessionMenu(it) }
+        }
+        row.addView(add, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { marginEnd = (6 * dp).toInt() })
+
+        // Keep the active chip in view after switching or creating sessions.
+        binding.sessionTabsScroll.post {
+            val index = list.indexOfFirst { it === current }
+            val target = if (index >= 0) row.getChildAt(index) else add
+            target?.let { binding.sessionTabsScroll.smoothScrollTo(it.left.coerceAtLeast(0), 0) }
+        }
+    }
+
+    /** [+] overflow: shell and root sandbox creation on any screen width. */
+    private fun showNewSessionMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, NEW_SHELL, 0, getString(R.string.action_new_shell))
+        popup.menu.add(0, NEW_ROOT, 1, getString(R.string.drawer_new_root_session))
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                NEW_SHELL -> newSession(root = false)
+                NEW_ROOT -> newSession(root = true)
+            }
+            true
+        }
+        popup.show()
     }
 
     private suspend fun refreshStatus() {
@@ -1084,13 +1220,42 @@ class TerminalActivity : AppCompatActivity(), TerminalSessionClient {
         const val STATE_STORAGE_CATEGORY = "storage_category"
         const val PREFS_SETTINGS = "noxs_settings"
         const val PREF_FIRST_SHELL_WELCOME_SHOWN = "first_shell_welcome_shown"
+        const val PREF_HEADER_STATS = "header_stats"
         const val WEBSITE_URL = "https://crossberry.vercel.app"
         const val SUPPORT_EMAIL = "mailto:crossberryweb@gmail.com"
         const val SHUTDOWN_GRACE_MS = 3_000L
-        const val MORE_CLEAR_SCROLLBACK = 301
-        const val MORE_SAVE_OUTPUT = 302
-        const val MORE_RESET_FONT = 303
-        const val MORE_SETTINGS = 304
-        const val MORE_TOGGLE_FULLSCREEN = 305
+
+        // Noxs design-system colors (mirror res/values/colors.xml).
+        private val ACCENT = 0xFF20D866.toInt()
+        private val ON_ACCENT = 0xFF04150A.toInt()
+        private val ELEVATED = 0xFF222222.toInt()
+        private val BORDER = 0xFF303030.toInt()
+        private val WARN_TEXT = 0xFFFFB020.toInt()
+        private val WARN_BORDER = 0xFF7A5613.toInt()
+        private val TEXT_WHITE = 0xFFFFFFFF.toInt()
+        private val DIM_TEXT = 0xFFAAAAAA.toInt()
+
+        const val NEW_SHELL = 300
+        const val NEW_ROOT = 301
+        const val MORE_CLEAR_TERMINAL = 302
+        const val MORE_CLEAR_SCROLLBACK = 303
+        const val MORE_SEARCH = 304
+        const val MORE_SCROLL_TOP = 305
+        const val MORE_SCROLL_BOTTOM = 306
+        const val MORE_PACKAGES = 307
+        const val MORE_FILES = 308
+        const val MORE_FONT_INFO = 309
+        const val MORE_FONT_INCR = 310
+        const val MORE_FONT_DECR = 311
+        const val MORE_RESET_FONT = 312
+        const val MORE_SAVE_OUTPUT = 313
+        const val MORE_TOGGLE_FULLSCREEN = 314
+        const val MORE_SESSION_SETTINGS = 315
+        const val MORE_SERVICES = 316
+        const val MORE_PROCESSES = 317
+        const val MORE_DIAGNOSTICS = 318
+        const val MORE_APP_SETTINGS = 319
+        const val HEADER_TOGGLE_STATS = 320
+        const val HEADER_CLOSE_SESSION = 321
     }
 }

@@ -96,7 +96,7 @@ class TerminalSettingsActivity : AppCompatActivity() {
             this,
             getString(R.string.settings_reset_terminal),
             getString(R.string.settings_reset_terminal_desc),
-            color = 0xffff6b6b.toInt()
+            color = 0xffff5252.toInt()
         ) { confirmReset() })
     }
 

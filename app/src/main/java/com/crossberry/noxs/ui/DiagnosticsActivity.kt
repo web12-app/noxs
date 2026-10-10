@@ -46,7 +46,7 @@ class DiagnosticsActivity : AppCompatActivity() {
         binding.inputBar.visibility = View.GONE
 
         val tv = TextView(this).apply {
-            setTextColor(0xffe6e6e6.toInt())
+            setTextColor(0xffffffff.toInt())
             textSize = 11f
             setPadding(32, 16, 32, 32)
             typeface = android.graphics.Typeface.MONOSPACE
