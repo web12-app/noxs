@@ -46,7 +46,7 @@ class SettingsActivity : AppCompatActivity() {
             this.text = text
             setTextColor(0xffaaaaaa.toInt())
             textSize = 12f
-            textStyle = android.graphics.Typeface.BOLD
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(48, 32, 48, 8)
         }
 
