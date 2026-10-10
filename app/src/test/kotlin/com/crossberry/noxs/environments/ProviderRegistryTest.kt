@@ -7,6 +7,7 @@ import com.crossberry.noxs.environments.model.EnvironmentStatus
 import com.crossberry.noxs.environments.model.EnvJson
 import com.crossberry.noxs.environments.providers.DebianProvider
 import com.crossberry.noxs.environments.providers.ProviderRegistry
+import com.crossberry.noxs.environments.providers.StorageRequirements
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
