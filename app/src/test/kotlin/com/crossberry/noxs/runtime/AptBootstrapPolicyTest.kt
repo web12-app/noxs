@@ -162,10 +162,11 @@ class AptRetryPolicyTest {
             "  Temporary failure resolving 'deb.debian.org'"
         val signature = AptRetryPolicy.failureSignature(aptErr, 100, timedOut = false)
         assertTrue(signature.contains("Temporary failure resolving"))
+        // JUnit 4 overload: message FIRST, then expected, then actual.
         assertEquals(
+            "the same DNS error must produce the same signature so repeated runs are detected",
             signature,
-            AptRetryPolicy.failureSignature(aptErr, 100, timedOut = false),
-            "the same DNS error must produce the same signature so repeated runs are detected"
+            AptRetryPolicy.failureSignature(aptErr, 100, timedOut = false)
         )
     }
 
