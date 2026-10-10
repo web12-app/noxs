@@ -75,6 +75,20 @@ class NoxsPluginInstaller(
 
     fun isInstalled(id: String): Boolean = installed(id) != null
 
+    /**
+     * True when a plugin directory exists but fails its metadata/integrity
+     * validation — a broken or tampered install the store must surface as
+     * BLOCKED instead of pretending the plugin was never installed.
+     */
+    fun hasInvalidRecord(id: String): Boolean {
+        if (!PluginJson.validId(id)) return false
+        val dir = pluginsDir(id)
+        if (!dir.isDirectory) return false
+        val meta = runCatching { PluginJson.parseMetaFile(File(dir, META_NAME)) }.getOrNull()
+            ?: return true
+        return !PluginValidation.valid(meta) || meta.id != id
+    }
+
     /** Update available when the registry version is newer semver-wise. */
     fun updateAvailable(entry: RegistryEntry, current: InstalledPlugin): Boolean {
         val registryVersion = PluginSemver.parse(entry.version) ?: return false
@@ -99,13 +113,26 @@ class NoxsPluginInstaller(
             logo = entry.logo, readme = entry.readme,
             author = null, license = null, category = entry.category,
             commands = emptyList(), keywords = entry.keywords,
-            homepage = null, repository = null
+            homepage = null, repository = null,
+            sdkVersion = entry.sdkVersion ?: SdkRequirements.DEFAULT_SDK_VERSION,
+            minimumSdkVersion = entry.minimumSdkVersion,
+            maximumSdkVersion = entry.maximumSdkVersion,
+            apiFeatures = entry.apiFeatures
         )
         if (PluginValidation.validate(entryMeta).isNotEmpty()) {
             throw InstallException("Registry metadata for this plugin is invalid")
         }
         if (!PluginValidation.compatible(entry.minimumNoxsVersion, appVersion)) {
             throw InstallException("This plugin needs Noxs ${entry.minimumNoxsVersion} or newer")
+        }
+        // SDK compatibility gate — a plugin this app cannot host is refused
+        // before anything is downloaded (mirror of the manager pre-check).
+        when (val plan = PluginSdkCatalog.resolve(SdkRequirements.from(entryMeta), appVersion)) {
+            is SdkPlan.Incompatible -> throw InstallException(plan.reason)
+            is SdkPlan.NeedsNewerApp -> throw InstallException(
+                "Update Noxs to ${plan.requiredNoxs} to use this plugin"
+            )
+            is SdkPlan.Supported -> Unit
         }
         val artifact = entry.artifact?.takeIf { it.startsWith("https://") }
             ?: throw InstallException("No release artifact is published for this plugin yet")
@@ -133,7 +160,7 @@ class NoxsPluginInstaller(
         if (!staging.mkdirs()) throw InstallException("Plugin storage is not writable")
         try {
             extractArtifact(bytes, staging)
-            validateStaged(staging, entry.id, entry.version)
+            validateStaged(staging, entry.id, entry.version, entryMeta)
             onProgress(85)
             if (target.exists()) {
                 // Refresh ownership first so an update cannot leak stale shims.
@@ -355,7 +382,7 @@ class NoxsPluginInstaller(
     }
 
     /** The staged tree must carry a valid plugin.json matching the registry. */
-    private fun validateStaged(staged: File, expectedId: String, expectedVersion: String) {
+    private fun validateStaged(staged: File, expectedId: String, expectedVersion: String, expected: PluginMeta) {
         val metaFile = File(staged, META_NAME)
         if (!metaFile.isFile) throw InstallException("The plugin package has no plugin.json")
         val meta = try {
@@ -372,6 +399,14 @@ class NoxsPluginInstaller(
         // A package whose version differs from the registry (stale or
         // tampered artifact) must not silently install as a different release.
         if (meta.version != expectedVersion) {
+            throw InstallException("The plugin package does not match its registry entry")
+        }
+        // SDK requirements inside the artifact must match the registry too —
+        // a mismatch means the archive is stale or tampered.
+        if (meta.sdkVersion != expected.sdkVersion ||
+            meta.minimumSdkVersion != expected.minimumSdkVersion ||
+            meta.maximumSdkVersion != expected.maximumSdkVersion
+        ) {
             throw InstallException("The plugin package does not match its registry entry")
         }
         if (!File(staged, PluginJson.RUNTIME_ENTRY).isFile) {

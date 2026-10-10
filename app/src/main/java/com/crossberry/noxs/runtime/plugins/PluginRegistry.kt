@@ -19,7 +19,8 @@ import java.security.MessageDigest
 
 class NoxsPluginRegistry(
     private val cacheDir: File,
-    private val fetcher: NoxsPluginRegistry.Fetcher = HttpsFetcher()
+    private val fetcher: NoxsPluginRegistry.Fetcher = HttpsFetcher(),
+    private val minRefreshIntervalMs: Long = DEFAULT_REFRESH_INTERVAL_MS
 ) {
 
     /** Download boundary — tests inject a fake. */
@@ -30,17 +31,33 @@ class NoxsPluginRegistry(
     class RegistryException(message: String) : Exception(message)
 
     private val cacheFile: File = File(cacheDir, "registry.json")
+    private val fetchStamp: File = File(cacheDir, ".registry-last-fetch")
     private val lock = Any()
 
     var lastRefreshOk: Boolean = false
         private set
 
-    /** Registry entries: fresh when possible, last-good cache otherwise. */
-    fun entries(refresh: Boolean = true): List<RegistryEntry> {
+    /** Registry entries: fresh when possible, last-good cache otherwise.
+    *
+    * Refreshes are throttled to one network fetch per [minRefreshIntervalMs]
+    * (configurable) so opening the store never hammers the registry; [force]
+    * (the store's manual refresh) bypasses the throttle. When the network is
+    * unavailable the cached registry is returned and [lastRefreshOk] is
+    * false — the store shows the offline state. */
+    fun entries(refresh: Boolean = true, force: Boolean = false): List<RegistryEntry> {
         synchronized(lock) {
             if (refresh) {
-                runCatching { refreshLocked() }
-                    .onFailure { NoxsLog.w("PluginRegistry", "registry refresh failed: ${it.javaClass.simpleName}") }
+                val throttled = !force &&
+                    runCatching { fetchStamp.lastModified() }
+                        .getOrDefault(0L) > System.currentTimeMillis() - minRefreshIntervalMs
+                if (!throttled) {
+                    runCatching { refreshLocked() }
+                        .onFailure {
+                            NoxsLog.w("PluginRegistry", "registry refresh failed: ${it.javaClass.simpleName}")
+                        }
+                } else {
+                    lastRefreshOk = true // served from the fresh-enough cache
+                }
             }
             if (cacheFile.isFile) {
                 return runCatching {
@@ -72,6 +89,8 @@ class NoxsPluginRegistry(
         val text = String(bytes, Charsets.UTF_8)
         PluginJson.parseRegistry(text) // reject broken payloads before caching
         adopt(text)
+        cacheDir.mkdirs()
+        fetchStamp.writeText(System.currentTimeMillis().toString(), Charsets.UTF_8)
         lastRefreshOk = true
     }
 
@@ -102,6 +121,7 @@ class NoxsPluginRegistry(
             "https://raw.githubusercontent.com/web12-app/noxs-plugins/main/registry.json"
         const val FETCH_TIMEOUT_MS = 15_000
         const val MAX_REGISTRY_BYTES = 2L * 1024L * 1024L
+        const val DEFAULT_REFRESH_INTERVAL_MS = 5L * 60L * 1000L
     }
 }
 

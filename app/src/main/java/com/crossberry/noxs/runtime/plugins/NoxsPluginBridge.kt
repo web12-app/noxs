@@ -141,7 +141,11 @@ class NoxsPluginBridge(private val paths: NoxsPaths) {
                             card.installed.enabled -> "installed"
                             else -> "disabled"
                         },
-                        if (card.updateAvailable) "update" else "-"
+                        if (card.updateAvailable) "update" else "-",
+                        // SDK columns (trailing — the CLI's cut -fN parsing is
+                        // unaffected for fields 1-8).
+                        card.entry.sdkVersion ?: SdkRequirements.DEFAULT_SDK_VERSION,
+                        card.compat.state.code
                     ).joinToString("\t") { field -> sanitizeField(field) }
                 )
             }

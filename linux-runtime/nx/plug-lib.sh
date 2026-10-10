@@ -157,7 +157,7 @@ nx_plug_info() {
         nx_err "Noxs plugin bridge is unavailable; start Noxs and open a terminal"
         return 1
     fi
-    local id="$1" line installed_line state
+    local id="$1" line installed_line state sdk_version compat compat_label
     line="$(nx_plug_catalog_line "$id")"
     installed_line="$(nx_plug_installed_line "$id")"
     if [ -z "$line" ] && [ -z "$installed_line" ]; then
@@ -176,6 +176,25 @@ nx_plug_info() {
         printf 'Category:    %s\n' "$(printf '%s' "$line" | cut -f4)"
         printf 'Keywords:    %s\n' "$(printf '%s' "$line" | cut -f5)"
         printf 'Description: %s\n' "$(printf '%s' "$line" | cut -f6)"
+        # Trailing Noxs Plugin SDK columns (9 = sdk version, 10 = compat state).
+        sdk_version="$(printf '%s' "$line" | cut -f9)"
+        compat="$(printf '%s' "$line" | cut -f10)"
+        if [ -n "$sdk_version" ] && [ "$sdk_version" != "-" ]; then
+            printf 'SDK:         Noxs Plugin SDK %s\n' "$sdk_version"
+        fi
+        case "$compat" in
+            compatible) compat_label="Compatible" ;;
+            sdk_missing) compat_label="Compatible (SDK downloads on install)" ;;
+            sdk_incompatible) compat_label="Incompatible with this Noxs" ;;
+            app_update_required) compat_label="Noxs update required" ;;
+            plugin_update_available) compat_label="Compatible (update available)" ;;
+            blocked) compat_label="Blocked — failed integrity checks" ;;
+            error) compat_label="Error" ;;
+            *) compat_label="" ;;
+        esac
+        if [ -n "$compat_label" ]; then
+            printf 'Status:      %s\n' "$compat_label"
+        fi
     fi
     printf 'State:       %s\n' "$state"
     printf 'Details:     Noxs sidebar → Plugins\n'

@@ -424,4 +424,86 @@ class NoxsPluginInstallerTest {
         installer.update(codeEntry("1.1.0"), installer.installed("code")!!)
         assertFalse(File(bin, "code").exists())
     }
+
+    // ------------------------------------------------ Noxs Plugin SDK gates
+
+    /** Plugin tar whose packaged plugin.json declares [sdkVersion]. */
+    private fun sdkTarBytes(version: String = "1.0.0", sdkVersion: String): ByteArray {
+        val pluginJson = """
+            {"id":"hello","name":"Hello","version":"$version",
+             "description":"Example Noxs plugin","main":"plugin.js",
+             "permissions":["ui"],"minimumNoxsVersion":"0.11.0",
+             "sdkVersion":"$sdkVersion"}
+        """.trimIndent().toByteArray()
+        return gzip(
+            tarEntry("plugin.js", "globalThis.__NOXS_PLUGIN__={};".toByteArray()),
+            tarEntry("plugin.json", pluginJson),
+            tarEntry("README.md", "# Hello".toByteArray()),
+            tarEntry("icon.svg", "<svg/>".toByteArray())
+        )
+    }
+
+    @Test
+    fun `a plugin requiring a newer sdk is refused before download`() {
+        val (installer, root) = installer(appVersion = "0.12.0")
+        val error = try {
+            installer.install(entry().copy(minimumSdkVersion = "0.0.2"))
+            null
+        } catch (e: NoxsPluginInstaller.InstallException) {
+            e
+        }
+        assertNotNull(error)
+        assertTrue(error!!.message!!.contains("Update Noxs"))
+        assertFalse(File(root, "hello").exists())
+    }
+
+    @Test
+    fun `contradictory sdk metadata is refused as invalid`() {
+        val (installer, _) = installer(appVersion = "0.13.0")
+        val error = try {
+            installer.install(entry().copy(minimumSdkVersion = "0.1.0"))
+            null
+        } catch (e: NoxsPluginInstaller.InstallException) {
+            e
+        }
+        assertNotNull(error)
+        assertEquals("Registry metadata for this plugin is invalid", error!!.message)
+    }
+
+    @Test
+    fun `sdk fields must match between registry and package`() {
+        // Registry says SDK 0.0.2, the artifact was built for 0.0.1.
+        val (installer, root) = installer(sdkTarBytes(sdkVersion = "0.0.1"), appVersion = "0.13.0")
+        val error = try {
+            installer.install(entry().copy(sdkVersion = "0.0.2"))
+            null
+        } catch (e: NoxsPluginInstaller.InstallException) {
+            e
+        }
+        assertNotNull(error)
+        assertEquals("The plugin package does not match its registry entry", error!!.message)
+        assertFalse(File(root, "hello").exists())
+    }
+
+    @Test
+    fun `a package declaring its sdk version installs cleanly`() {
+        val (installer, _) = installer(sdkTarBytes(sdkVersion = "0.0.1"), appVersion = "0.13.0")
+        val installed = installer.install(entry().copy(sdkVersion = "0.0.1"))
+        assertEquals("0.0.1", installed.meta.sdkVersion)
+        assertEquals(listOf("hello"), installer.listInstalled().map { it.meta.id })
+    }
+
+    @Test
+    fun `hasInvalidRecord surfaces broken installs for the store`() {
+        val (installer, root) = installer(appVersion = "0.13.0")
+        assertFalse(installer.hasInvalidRecord("hello"))
+        installer.install(entry())
+        assertFalse(installer.hasInvalidRecord("hello"))
+        // Tamper with the installed metadata — listInstalled hides it, but
+        // the store must see the plugin as BLOCKED, not uninstalled.
+        File(root, "hello/plugin.json").writeText("{ broken", Charsets.UTF_8)
+        assertTrue(installer.listInstalled().isEmpty())
+        assertTrue(installer.hasInvalidRecord("hello"))
+        assertFalse(installer.hasInvalidRecord("missing"))
+    }
 }

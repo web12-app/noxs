@@ -530,6 +530,30 @@
     <string name="plugin_details_readme">README</string>
     <string name="plugin_details_readme_missing">No README is published for this plugin yet.</string>
     <string name="title_plugin_window">Plugin window</string>
+    <!-- Noxs Plugin SDK / store compatibility -->
+    <string name="plugin_action_refresh">Refresh</string>
+    <string name="plugin_action_blocked">Update Noxs</string>
+    <string name="plugin_badge_new">NEW</string>
+    <string name="plugin_badge_update">UPDATE</string>
+    <string name="plugin_sdk_line">  •  SDK %1$s</string>
+    <string name="plugin_store_offline">Offline — showing the last cached plugin list.</string>
+    <string name="plugin_filter_compatible">Compatible</string>
+    <string name="plugin_filter_app_update">App update required</string>
+    <string name="plugin_filter_incompatible">Incompatible</string>
+    <string name="plugin_filter_blocked">Blocked</string>
+    <string name="plugin_compat_compatible">Compatible</string>
+    <string name="plugin_compat_sdk_missing">SDK will download</string>
+    <string name="plugin_compat_sdk_incompatible">Incompatible with this Noxs</string>
+    <string name="plugin_compat_app_update_required">Noxs update required</string>
+    <string name="plugin_compat_update_available">Update available</string>
+    <string name="plugin_compat_blocked">Blocked</string>
+    <string name="plugin_compat_error">Error</string>
+    <string name="plugin_details_sdk">Noxs Plugin SDK</string>
+    <string name="plugin_details_api_features">API features</string>
+    <string name="plugin_details_compatibility">Compatibility: %1$s</string>
+    <string name="plugin_details_installed_version">Installed version</string>
+    <string name="plugin_details_your_noxs">Your Noxs</string>
+    <string name="plugin_update_noxs_required">Update Noxs to %1$s or newer to use this plugin.</string>
 
     <!-- Header / session state (UI redesign) -->
     <string name="state_running">RUNNING</string>

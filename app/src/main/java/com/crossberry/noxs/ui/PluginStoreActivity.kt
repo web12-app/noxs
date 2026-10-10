@@ -1,11 +1,18 @@
 /*
  * Noxs — original implementation.
- * PluginStoreActivity: the Noxs Plugin Store. Search, All/Installed/Updates
- * filters, plugin cards (logo, name, description, version, category, action)
- * and the entry point shared by the sidebar and `nx plug`.
+ * PluginStoreActivity: the Noxs Plugin Store. Search, filters (All /
+ * Installed / Updates / Compatible / App update required / Incompatible /
+ * Blocked), plugin cards (logo, name, description, version, SDK, category,
+ * compatibility, action) and the entry point shared by the sidebar and
+ * `nx plug`.
  *
  * Every state comes from NoxsPluginManager — the same service the CLI uses.
- * Nothing here hardcodes plugin metadata.
+ * Nothing here hardcodes plugin metadata. The registry refreshes when the
+ * store opens (throttled by NoxsPluginRegistry) and via the Refresh button;
+ * offline the last-good cached registry is shown with an offline notice.
+ * New plugins get a "New" badge (PluginSeenStore) until the user opens
+ * their details page; updates show an "Update" badge only when the
+ * installed version is genuinely older.
  */
 package com.crossberry.noxs.ui
 
@@ -31,6 +38,7 @@ import com.crossberry.noxs.R
 import com.crossberry.noxs.runtime.plugins.InstalledPlugin
 import com.crossberry.noxs.runtime.plugins.NoxsPluginManager
 import com.crossberry.noxs.runtime.plugins.NoxsPluginRuntime
+import com.crossberry.noxs.runtime.plugins.PluginCompatState
 import com.crossberry.noxs.runtime.plugins.RegistryEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,13 +49,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 class PluginStoreActivity : AppCompatActivity() {
 
-    enum class Filter { ALL, INSTALLED, UPDATES }
+    enum class Filter { ALL, INSTALLED, UPDATES, COMPATIBLE, APP_UPDATE, INCOMPATIBLE, BLOCKED }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var manager: NoxsPluginManager? = null
 
     private lateinit var adapter: PluginCardAdapter
     private lateinit var statusView: TextView
+    private lateinit var offlineView: TextView
     private lateinit var searchInput: EditText
     private lateinit var chipRow: LinearLayout
     private val chipViews = mutableMapOf<Filter, TextView>()
@@ -55,6 +64,7 @@ class PluginStoreActivity : AppCompatActivity() {
     private var filter: Filter = Filter.ALL
     private var query: String = ""
     private var cards: List<NoxsPluginManager.StoreCard> = emptyList()
+    private var offline = false
     private val busyIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private val dp: Float
@@ -65,7 +75,11 @@ class PluginStoreActivity : AppCompatActivity() {
         manager = pluginManager()
         buildUi()
         adapter = PluginCardAdapter(
-            onCardClick = { card -> openDetails(card.entry.id) },
+            onCardClick = { card ->
+                manager?.seenStore?.markSeen(listOf(card.entry.id))
+                adapter.markSeen(card.entry.id)
+                openDetails(card.entry.id)
+            },
             onActionClick = { card -> runAction(card.entry.id) }
         )
         contentList.adapter = adapter
@@ -84,16 +98,23 @@ class PluginStoreActivity : AppCompatActivity() {
 
     // --------------------------------------------------------------- data
 
-    private fun load() {
+    private fun load(force: Boolean = false) {
         statusView.text = getString(R.string.plugin_store_loading)
         statusView.visibility = TextView.VISIBLE
+        offlineView.visibility = TextView.GONE
         scope.launch(Dispatchers.IO) {
-            val loaded = manager?.let { m ->
-                runCatching { m.storeCards(refresh = true) }.getOrDefault(emptyList())
+            val mgr = manager
+            val loaded = mgr?.let { m ->
+                runCatching { m.storeCards(refresh = true, force = force) }.getOrDefault(emptyList())
             } ?: emptyList()
+            val wasOffline = mgr != null && loaded.isNotEmpty() && !mgr.lastRefreshOk
+            val seen = mgr?.seenStore?.seen() ?: emptySet()
             scope.launch {
                 cards = loaded
+                offline = wasOffline
+                adapter.setSeen(seen)
                 applyFilter()
+                offlineView.visibility = if (offline) TextView.VISIBLE else TextView.GONE
             }
         }
     }
@@ -107,10 +128,17 @@ class PluginStoreActivity : AppCompatActivity() {
                 card.entry.description.lowercase().contains(q) ||
                 (card.entry.category?.lowercase()?.contains(q) ?: false) ||
                 card.entry.keywords.any { it.lowercase().contains(q) }
+            val state = card.compat.state
             val matchesFilter = when (filter) {
                 Filter.ALL -> true
                 Filter.INSTALLED -> card.installed != null
                 Filter.UPDATES -> card.updateAvailable
+                Filter.COMPATIBLE -> state == PluginCompatState.COMPATIBLE ||
+                    state == PluginCompatState.PLUGIN_UPDATE_AVAILABLE ||
+                    state == PluginCompatState.SDK_MISSING
+                Filter.APP_UPDATE -> state == PluginCompatState.APP_UPDATE_REQUIRED
+                Filter.INCOMPATIBLE -> state == PluginCompatState.SDK_INCOMPATIBLE
+                Filter.BLOCKED -> state == PluginCompatState.BLOCKED
             }
             matchesQuery && matchesFilter
         }
@@ -139,6 +167,9 @@ class PluginStoreActivity : AppCompatActivity() {
         val mgr = manager ?: return
         when {
             busyIds.contains(id) -> return
+            card.compat.state == PluginCompatState.APP_UPDATE_REQUIRED ||
+                card.compat.state == PluginCompatState.SDK_INCOMPATIBLE ||
+                card.compat.state == PluginCompatState.BLOCKED -> return // details explain why
             local == null -> install(id)
             card.updateAvailable -> install(id, update = true)
             !local.enabled -> {
@@ -160,16 +191,25 @@ class PluginStoreActivity : AppCompatActivity() {
         toast(getString(R.string.plugin_installing_toast))
         scope.launch(Dispatchers.IO) {
             val outcome = runCatching { if (update) mgr.update(id) else mgr.install(id) }
+            val runtime = outcome.getOrNull()?.let { installed -> mgr.sdkRuntimeJs(installed) }
             scope.launch {
                 busyIds.remove(id)
                 outcome
                     .onSuccess { installed ->
-                        // Load the plugin right after a successful install.
-                        NoxsPluginRuntime.activate(applicationContext, installed)
-                        toast(getString(R.string.plugin_installed_toast, installed.meta.name))
+                        // Load the plugin right after a successful install,
+                        // through its verified Noxs Plugin SDK bootstrap.
+                        if (runtime?.js != null) {
+                            NoxsPluginRuntime.activate(applicationContext, installed, runtime.js)
+                            toast(getString(R.string.plugin_installed_toast, installed.meta.name))
+                        } else {
+                            toast(
+                                runtime?.message
+                                    ?: getString(R.string.plugin_installed_toast, installed.meta.name)
+                            )
+                        }
                     }
-                    .onFailure {
-                        toast(getString(R.string.plugin_install_failed_toast))
+                    .onFailure { failure ->
+                        toast(failure.message ?: getString(R.string.plugin_install_failed_toast))
                     }
                 load()
             }
@@ -177,12 +217,22 @@ class PluginStoreActivity : AppCompatActivity() {
     }
 
     private fun openPlugin(plugin: InstalledPlugin) {
-        if (!NoxsPluginRuntime.isActive(plugin.meta.id)) {
-            NoxsPluginRuntime.activate(applicationContext, plugin)
-            Toast.makeText(this, getString(R.string.plugin_opened_toast), Toast.LENGTH_SHORT).show()
-        }
-        if (NoxsPluginRuntime.activePluginIds().none { it == plugin.meta.id }) {
-            toast(getString(R.string.plugin_action_failed))
+        if (NoxsPluginRuntime.isActive(plugin.meta.id)) return
+        busyIds.add(plugin.meta.id)
+        scope.launch(Dispatchers.IO) {
+            val runtime = manager?.sdkRuntimeJs(plugin)
+            scope.launch {
+                busyIds.remove(plugin.meta.id)
+                val js = runtime?.js
+                if (js != null) {
+                    NoxsPluginRuntime.activate(applicationContext, plugin, js)
+                    Toast.makeText(this@PluginStoreActivity, getString(R.string.plugin_opened_toast), Toast.LENGTH_SHORT).show()
+                } else {
+                    toast(
+                        runtime?.message ?: getString(R.string.plugin_action_failed)
+                    )
+                }
+            }
         }
     }
 
@@ -206,7 +256,7 @@ class PluginStoreActivity : AppCompatActivity() {
         }
         setContentView(root)
 
-        // Header: "Plugins" + close.
+        // Header: "Plugins" + refresh + close.
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -217,6 +267,13 @@ class PluginStoreActivity : AppCompatActivity() {
             setTextColor(0xFFE6EDF3.toInt())
             textSize = 19f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        header.addView(TextView(this).apply {
+            text = getString(R.string.plugin_action_refresh)
+            setTextColor(0xFF7CE8B8.toInt())
+            textSize = 13f
+            setPadding((10 * dp).toInt(), (4 * dp).toInt(), (10 * dp).toInt(), (4 * dp).toInt())
+            setOnClickListener { load(force = true) }
         })
         header.addView(TextView(this).apply {
             text = getString(R.string.action_close)
@@ -240,12 +297,28 @@ class PluginStoreActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { setMargins((14 * dp).toInt(), (2 * dp).toInt(), (14 * dp).toInt(), (6 * dp).toInt()) })
 
-        // Filter chips: All / Installed / Updates.
+        // Filter chips (scrollable): All / Installed / Updates / Compatible /
+        // App update required / Incompatible / Blocked.
+        val chipScroller = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+        }
         chipRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
         }
-        root.addView(chipRow)
+        chipScroller.addView(chipRow)
+        root.addView(chipScroller)
+
+        // Offline notice (cached registry).
+        offlineView = TextView(this).apply {
+            text = getString(R.string.plugin_store_offline)
+            setTextColor(0xFFF0C674.toInt())
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding((16 * dp).toInt(), (6 * dp).toInt(), (16 * dp).toInt(), (2 * dp).toInt())
+            visibility = TextView.GONE
+        }
+        root.addView(offlineView)
 
         // Status (loading / empty / no results).
         statusView = TextView(this).apply {
@@ -269,7 +342,11 @@ class PluginStoreActivity : AppCompatActivity() {
         listOf(
             Filter.ALL to R.string.plugin_filter_all,
             Filter.INSTALLED to R.string.plugin_filter_installed,
-            Filter.UPDATES to R.string.plugin_filter_updates
+            Filter.UPDATES to R.string.plugin_filter_updates,
+            Filter.COMPATIBLE to R.string.plugin_filter_compatible,
+            Filter.APP_UPDATE to R.string.plugin_filter_app_update,
+            Filter.INCOMPATIBLE to R.string.plugin_filter_incompatible,
+            Filter.BLOCKED to R.string.plugin_filter_blocked
         ).forEach { (filterId, label) ->
             val chip = TextView(this).apply {
                 text = getString(label)
@@ -329,8 +406,9 @@ class PluginStoreActivity : AppCompatActivity() {
 
 /**
  * Store list adapter. Each card shows exactly what the registry entry says:
- * logo (fetched from logoUrl), name, description, version + category and a
- * state-aware action button.
+ * logo (fetched from logoUrl), name, badges (New / Update), description,
+ * version + SDK + category, the compatibility line and a state-aware action
+ * button (hidden when the plugin cannot run on this Noxs release).
  */
 class PluginCardAdapter(
     private val onCardClick: (NoxsPluginManager.StoreCard) -> Unit,
@@ -340,10 +418,23 @@ class PluginCardAdapter(
     private var items: List<NoxsPluginManager.StoreCard> = emptyList()
     private var installed: Map<String, InstalledPlugin> = emptyMap()
     private var busy: Set<String> = emptySet()
+    private var seenIds: Set<String> = emptySet()
     private val logoCache = ConcurrentHashMap<String, android.graphics.Bitmap>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
 
     class Holder(val row: LinearLayout) : RecyclerView.ViewHolder(row)
+
+    /** Ids already seen by the user — everything else shows a New badge. */
+    fun setSeen(seen: Set<String>) {
+        seenIds = seen
+        notifyDataSetChanged()
+    }
+
+    fun markSeen(id: String) {
+        if (id in seenIds) return
+        seenIds = seenIds + id
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val dp = TypedValue.applyDimension(
@@ -390,30 +481,85 @@ class PluginCardAdapter(
         holder.row.addView(logo)
         bindLogo(logo, entry)
 
-        // Name / description / version + category.
+        // Name + badges / description / version + SDK + category / compat.
         val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        textColumn.addView(TextView(context).apply {
+
+        // Name row with New / Update badges.
+        val nameRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        nameRow.addView(TextView(context).apply {
             text = entry.name
             setTextColor(0xFFE6EDF3.toInt())
             textSize = 15f
         })
+        val newBadgeState = card.compat.state == PluginCompatState.COMPATIBLE ||
+            card.compat.state == PluginCompatState.PLUGIN_UPDATE_AVAILABLE ||
+            card.compat.state == PluginCompatState.SDK_MISSING
+        if (newBadgeState && !seenIds.contains(entry.id)) {
+            nameRow.addView(badge(context, dp, context.getString(R.string.plugin_badge_new), 0xFF1F4D38.toInt(), 0xFF7CE8B8.toInt()))
+        }
+        if (card.updateAvailable) {
+            nameRow.addView(badge(context, dp, context.getString(R.string.plugin_badge_update), 0xFF4D3A1F.toInt(), 0xFFF0C674.toInt()))
+        }
+        textColumn.addView(nameRow)
+
         textColumn.addView(TextView(context).apply {
             text = entry.description
             setTextColor(0xFF8FA0AF.toInt())
             textSize = 12f
             maxLines = 2
         })
+        val sdkLabel = entry.sdkVersion ?: "0.0.1"
         textColumn.addView(TextView(context).apply {
-            text = "v${entry.version}" + (entry.category?.let { "  •  $it" } ?: "")
+            text = "v${entry.version}" +
+                context.getString(R.string.plugin_sdk_line, sdkLabel) +
+                (entry.category?.let { "  •  $it" } ?: "")
             setTextColor(0xFF6B7A88.toInt())
             textSize = 11f
         })
+
+        // Compatibility line — colored, with the reason when present.
+        val compat = card.compat
+        textColumn.addView(TextView(context).apply {
+            text = compatText(context, card)
+            setTextColor(
+                when (compat.state) {
+                    PluginCompatState.COMPATIBLE -> 0xFF7CE8B8.toInt()
+                    PluginCompatState.PLUGIN_UPDATE_AVAILABLE -> 0xFFF0C674.toInt()
+                    PluginCompatState.SDK_MISSING -> 0xFF8AB6E8.toInt()
+                    PluginCompatState.APP_UPDATE_REQUIRED,
+                    PluginCompatState.SDK_INCOMPATIBLE,
+                    PluginCompatState.BLOCKED,
+                    PluginCompatState.ERROR -> 0xFFF28B82.toInt()
+                }
+            )
+            textSize = 11f
+            maxLines = 2
+        })
         holder.row.addView(textColumn)
 
-        // Action button — state aware.
+        // Action button — hidden when this Noxs release cannot run the plugin.
+        val actionBlocked = card.compat.state == PluginCompatState.APP_UPDATE_REQUIRED ||
+            card.compat.state == PluginCompatState.SDK_INCOMPATIBLE ||
+            card.compat.state == PluginCompatState.BLOCKED
+        if (actionBlocked) {
+            holder.row.addView(TextView(context).apply {
+                text = context.getString(R.string.plugin_action_blocked)
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding((14 * dp).toInt(), (8 * dp).toInt(), (14 * dp).toInt(), (8 * dp).toInt())
+                setTextColor(0xFFF28B82.toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { marginStart = (8 * dp).toInt() }
+            })
+            return
+        }
         val actionLabel = when {
             busy.contains(entry.id) -> context.getString(R.string.plugin_action_working)
             card.installed == null -> context.getString(R.string.plugin_action_install)
@@ -449,6 +595,43 @@ class PluginCardAdapter(
             ).apply { marginStart = (8 * dp).toInt() }
             setOnClickListener { onActionClick(card) }
         })
+    }
+
+    private fun compatText(context: android.content.Context, card: NoxsPluginManager.StoreCard): String {
+        val label = when (card.compat.state) {
+            PluginCompatState.COMPATIBLE -> context.getString(R.string.plugin_compat_compatible)
+            PluginCompatState.SDK_MISSING -> context.getString(R.string.plugin_compat_sdk_missing)
+            PluginCompatState.SDK_INCOMPATIBLE -> context.getString(R.string.plugin_compat_sdk_incompatible)
+            PluginCompatState.APP_UPDATE_REQUIRED -> context.getString(R.string.plugin_compat_app_update_required)
+            PluginCompatState.PLUGIN_UPDATE_AVAILABLE -> context.getString(R.string.plugin_compat_update_available)
+            PluginCompatState.BLOCKED -> context.getString(R.string.plugin_compat_blocked)
+            PluginCompatState.ERROR -> context.getString(R.string.plugin_compat_error)
+        }
+        return card.compat.reason?.let { "$label — $it" } ?: label
+    }
+
+    private fun badge(
+        context: android.content.Context,
+        dp: Float,
+        text: String,
+        background: Int,
+        foreground: Int
+    ): TextView = TextView(context).apply {
+        this.text = text
+        textSize = 9f
+        setTextColor(foreground)
+        gravity = Gravity.CENTER
+        setPadding((6 * dp).toInt(), (2 * dp).toInt(), (6 * dp).toInt(), (2 * dp).toInt())
+        background = GradientDrawable().apply {
+            cornerRadius = 8f * dp
+            setColor(background)
+        }
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = (6 * dp).toInt()
+            gravity = Gravity.CENTER_VERTICAL
+        }
     }
 
     private fun bindLogo(view: ImageView, entry: RegistryEntry) {

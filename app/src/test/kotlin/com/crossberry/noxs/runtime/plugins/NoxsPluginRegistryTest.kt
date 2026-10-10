@@ -98,4 +98,54 @@ class NoxsPluginRegistryTest {
             PluginChecksum.sha256(ByteArray(0))
         )
     }
+
+    // ------------------------------------------------- refresh throttling
+
+    private class CountingFetcher(vararg payloads: String) : NoxsPluginRegistry.Fetcher {
+        var fetches = 0
+        private val queue = ArrayDeque(payloads.toList())
+        override fun get(url: String, timeoutMs: Int): ByteArray {
+            fetches += 1
+            return (queue.removeFirstOrNull()
+                ?: throw java.io.IOException("offline")).toByteArray()
+        }
+    }
+
+    private fun registryPayload() =
+        """{"version":1,"plugins":[{"id":"hello","name":"Hello","version":"1.0.0",
+            "description":"Example","permissions":["ui"]}]}"""
+
+    @Test
+    fun `entries refresh is throttled to the configured interval`() {
+        val fetcher = CountingFetcher(registryPayload())
+        val registry = NoxsPluginRegistry(tmp.newFolder(), fetcher, minRefreshIntervalMs = 60_000L)
+
+        assertTrue(registry.entries(refresh = true).isNotEmpty())
+        assertEquals(1, fetcher.fetches)
+        assertTrue(registry.lastRefreshOk)
+
+        // Inside the interval: served from cache, no network.
+        assertEquals(listOf("hello"), registry.entries(refresh = true).map { it.id })
+        assertEquals(1, fetcher.fetches)
+
+        // Force (the store's manual refresh) bypasses the throttle.
+        assertEquals(listOf("hello"), registry.entries(refresh = true, force = true).map { it.id })
+        assertEquals(2, fetcher.fetches)
+    }
+
+    @Test
+    fun `a failed refresh keeps the cached registry and reports offline`() {
+        val fetcher = CountingFetcher(registryPayload())
+        val registry = NoxsPluginRegistry(tmp.newFolder(), fetcher, minRefreshIntervalMs = 0L)
+        assertTrue(registry.entries(refresh = true).isNotEmpty())
+
+        val offline = NoxsPluginRegistry(tmp.newFolder().also { dir ->
+            // Copy the populated cache into a second registry with a failing fetcher.
+            java.io.File(dir, "registry.json").writeText(registryPayload(), Charsets.UTF_8)
+        }, fetcher = { _: String, _: Int -> throw java.io.IOException("offline") })
+
+        assertEquals(listOf("hello"), offline.entries(refresh = true).map { it.id })
+        assertFalse(offline.lastRefreshOk)
+        assertEquals(2, fetcher.fetches) // second registry attempted the network
+    }
 }

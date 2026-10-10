@@ -134,4 +134,79 @@ class PluginModelsTest {
         assertEquals(1, format)
         assertEquals(listOf("ok"), entries.map { it.id })
     }
+
+    // ------------------------------------------------ Noxs Plugin SDK fields
+
+    @Test
+    fun `manifest without sdk fields defaults to the initial stable sdk`() {
+        val meta = PluginJson.parseMeta(
+            """{"id":"a1","name":"A","version":"1.0.0","description":"test","main":"plugin.js","permissions":["ui"],"minimumNoxsVersion":"0.11.0"}"""
+        )
+        assertEquals("0.0.1", meta.sdkVersion)
+        assertNull(meta.minimumSdkVersion)
+        assertNull(meta.maximumSdkVersion)
+        assertEquals(emptyList<String>(), meta.apiFeatures)
+        assertTrue(PluginValidation.valid(meta))
+    }
+
+    @Test
+    fun `sdk fields are parsed from the manifest`() {
+        val meta = PluginJson.parseMeta(
+            """
+            {"id":"a1","name":"A","version":"1.0.0","description":"test","main":"plugin.js",
+             "permissions":["ui","storage"],"minimumNoxsVersion":"0.13.0",
+             "sdkVersion":"0.0.2","minimumSdkVersion":"0.0.1","maximumSdkVersion":"0.1.0",
+             "apiFeatures":["logging","storage"]}
+            """.trimIndent()
+        )
+        assertEquals("0.0.2", meta.sdkVersion)
+        assertEquals("0.0.1", meta.minimumSdkVersion)
+        assertEquals("0.1.0", meta.maximumSdkVersion)
+        assertEquals(listOf("logging", "storage"), meta.apiFeatures)
+        assertTrue(PluginValidation.valid(meta))
+    }
+
+    @Test
+    fun `registry entries carry sdk fields with legacy defaults`() {
+        val (format, entries) = PluginJson.parseRegistry(
+            """{"version":1,"plugins":[
+                 {"id":"a1","name":"A","version":"1.0.0","description":"t","permissions":["ui"],
+                  "sdkVersion":"0.0.2","minimumSdkVersion":"0.0.1","apiFeatures":["ui"]},
+                 {"id":"b2","name":"B","version":"1.0.0","description":"t","permissions":["ui"]}]}"""
+        )
+        assertEquals(1, format)
+        assertEquals("0.0.2", entries[0].sdkVersion)
+        assertEquals(listOf("ui"), entries[0].apiFeatures)
+        assertNull(entries[1].sdkVersion)
+    }
+
+    @Test
+    fun `contradictory sdk requirements are rejected`() {
+        fun metaWith(vararg pairs: String): PluginMeta = PluginJson.parseMeta(
+            """
+            {"id":"a1","name":"A","version":"1.0.0","description":"test","main":"plugin.js",
+             "permissions":["ui"],"minimumNoxsVersion":"0.11.0",${pairs.joinToString(",")}}
+            """.trimIndent()
+        )
+        // minimumSdkVersion above sdkVersion.
+        assertTrue(
+            PluginValidation.validate(
+                metaWith("\"sdkVersion\":\"0.0.2\",\"minimumSdkVersion\":\"0.1.0\"")
+            ).isNotEmpty()
+        )
+        // maximum below minimum.
+        assertTrue(
+            PluginValidation.validate(
+                metaWith("\"sdkVersion\":\"0.0.2\",\"minimumSdkVersion\":\"0.0.1\",\"maximumSdkVersion\":\"0.0.1\"")
+            ).isNotEmpty()
+        )
+        // Unknown feature.
+        assertTrue(
+            PluginValidation.validate(metaWith("\"apiFeatures\":[\"teleport\"]")).isNotEmpty()
+        )
+        // Broken sdkVersion.
+        assertTrue(
+            PluginValidation.validate(metaWith("\"sdkVersion\":\"latest\"")).isNotEmpty()
+        )
+    }
 }

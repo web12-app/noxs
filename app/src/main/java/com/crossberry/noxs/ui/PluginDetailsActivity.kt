@@ -57,6 +57,8 @@ class PluginDetailsActivity : AppCompatActivity() {
     private lateinit var readmeView: WebView
     private var current: InstalledPlugin? = null
     private var entry: RegistryEntry? = null
+    private var compat: com.crossberry.noxs.runtime.plugins.PluginCompatInfo? = null
+    private var appVersion: String = "0.0.0"
     private var busy = false
 
     private val dp: Float
@@ -72,12 +74,13 @@ class PluginDetailsActivity : AppCompatActivity() {
         manager = runCatching {
             val app = application as com.crossberry.noxs.NoxsApplication
             val paths = app.environments.activePaths()
+            appVersion = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull() ?: "0.0.0"
             NoxsPluginManager(
                 rootfsHome = paths.rootfsHomeNoxs,
                 cacheDir = app.cacheDir,
-                appVersion = runCatching {
-                    packageManager.getPackageInfo(packageName, 0).versionName
-                }.getOrNull() ?: "0.0.0",
+                appVersion = appVersion,
                 guestBinDir = java.io.File(paths.rootfs, "usr/local/bin")
             )
         }.getOrNull()
@@ -89,9 +92,23 @@ class PluginDetailsActivity : AppCompatActivity() {
         scope.launch(Dispatchers.IO) {
             val entryLoaded = manager?.catalog(refresh = true)?.firstOrNull { it.id == pluginId }
             val installedLoaded = manager?.installed(pluginId)
+            manager?.seenStore?.markSeen(listOf(pluginId))
+            val compatLoaded = if (entryLoaded != null) {
+                runCatching {
+                    com.crossberry.noxs.runtime.plugins.PluginSdkCatalog.compat(
+                        entryLoaded,
+                        installedLoaded,
+                        appVersion,
+                        manager?.sdkStore?.installedVersions()?.toSet().orEmpty(),
+                        installedLoaded == null && manager?.installer?.hasInvalidRecord(pluginId) == true,
+                        installedLoaded != null && manager?.installer?.updateAvailable(entryLoaded, installedLoaded) == true
+                    )
+                }.getOrNull()
+            } else null
             scope.launch {
                 entry = entryLoaded
                 current = installedLoaded
+                compat = compatLoaded
                 renderMeta()
                 loadReadme(entryLoaded, installedLoaded)
             }
@@ -274,12 +291,23 @@ class PluginDetailsActivity : AppCompatActivity() {
                 metaColumn.addView(metaLine(getString(R.string.plugin_details_author), e.author))
                 metaColumn.addView(metaLine(getString(R.string.plugin_details_license), e.license))
                 metaColumn.addView(metaLine(getString(R.string.plugin_details_category), e.category))
-                metaColumn.addView(
-                    metaLine(
-                        getString(R.string.plugin_details_minimum),
-                        e.minimumNoxsVersion
+                metaColumn.addView(metaLine(getString(R.string.plugin_details_minimum), e.minimumNoxsVersion))
+                metaColumn.addView(metaLine(getString(R.string.plugin_details_sdk), e.sdkVersion ?: "0.0.1"))
+                if (e.apiFeatures.isNotEmpty()) {
+                    metaColumn.addView(
+                        metaLine(
+                            getString(R.string.plugin_details_api_features),
+                            e.apiFeatures.joinToString(", ")
+                        )
                     )
-                )
+                }
+                compat?.let { renderCompat(it) }
+                metaColumn.addView(metaLine(getString(R.string.plugin_details_your_noxs), appVersion))
+                current?.let {
+                    metaColumn.addView(
+                        metaLine(getString(R.string.plugin_details_installed_version), "v${it.meta.version}")
+                    )
+                }
                 metaColumn.addView(metaLine(getString(R.string.plugin_details_repository), e.repository))
                 renderPermissions(e.permissions)
                 renderCommands()
@@ -323,6 +351,56 @@ class PluginDetailsActivity : AppCompatActivity() {
         }
     }
 
+    private fun renderCompat(info: com.crossberry.noxs.runtime.plugins.PluginCompatInfo) {
+        val label = when (info.state) {
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.COMPATIBLE ->
+                getString(R.string.plugin_compat_compatible)
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.SDK_MISSING ->
+                getString(R.string.plugin_compat_sdk_missing)
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.SDK_INCOMPATIBLE ->
+                getString(R.string.plugin_compat_sdk_incompatible)
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.APP_UPDATE_REQUIRED ->
+                getString(R.string.plugin_compat_app_update_required)
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.PLUGIN_UPDATE_AVAILABLE ->
+                getString(R.string.plugin_compat_update_available)
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.BLOCKED ->
+                getString(R.string.plugin_compat_blocked)
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.ERROR ->
+                getString(R.string.plugin_compat_error)
+        }
+        val color = when (info.state) {
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.COMPATIBLE -> 0xFF7CE8B8.toInt()
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.PLUGIN_UPDATE_AVAILABLE -> 0xFFF0C674.toInt()
+            com.crossberry.noxs.runtime.plugins.PluginCompatState.SDK_MISSING -> 0xFF8AB6E8.toInt()
+            else -> 0xFFF28B82.toInt()
+        }
+        metaColumn.addView(TextView(this).apply {
+            text = getString(R.string.plugin_details_compatibility, label)
+            setTextColor(color)
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(0, (6 * dp).toInt(), 0, (2 * dp).toInt())
+        })
+        info.reason?.let { reason ->
+            metaColumn.addView(TextView(this).apply {
+                text = reason
+                setTextColor(0xFF9AA7B4.toInt())
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding((12 * dp).toInt(), 0, (12 * dp).toInt(), 0)
+            })
+        }
+        info.requiredNoxs?.let { required ->
+            metaColumn.addView(TextView(this).apply {
+                text = getString(R.string.plugin_update_noxs_required, required)
+                setTextColor(0xFFF28B82.toInt())
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(0, (6 * dp).toInt(), 0, 0)
+            })
+        }
+    }
+
     private fun renderPermissions(permissions: List<String>) {
         permissionsBox.removeAllViews()
         permissionsBox.addView(TextView(this).apply {
@@ -361,6 +439,9 @@ class PluginDetailsActivity : AppCompatActivity() {
 
     private fun renderActions(e: RegistryEntry?) {
         val local = current
+        val incompatible = compat?.state == com.crossberry.noxs.runtime.plugins.PluginCompatState.APP_UPDATE_REQUIRED ||
+            compat?.state == com.crossberry.noxs.runtime.plugins.PluginCompatState.SDK_INCOMPATIBLE ||
+            compat?.state == com.crossberry.noxs.runtime.plugins.PluginCompatState.BLOCKED
         when {
             busy -> {
                 actionButton.text = getString(R.string.plugin_action_working)
@@ -370,18 +451,18 @@ class PluginDetailsActivity : AppCompatActivity() {
             }
             local == null -> {
                 actionButton.text = getString(R.string.plugin_action_install)
-                actionButton.isEnabled = e?.artifact != null
+                actionButton.isEnabled = e?.artifact != null && !incompatible
                 secondaryButton.visibility = TextView.GONE
                 dangerButton.visibility = TextView.GONE
             }
             else -> {
-                val update = e != null && manager?.installer?.updateAvailable(e, local) == true
+                val update = e != null && manager?.installer?.updateAvailable(e, local) == true && !incompatible
                 if (update) {
                     actionButton.text = getString(R.string.plugin_action_update)
                     actionButton.isEnabled = true
                 } else {
                     actionButton.text = getString(R.string.plugin_action_open)
-                    actionButton.isEnabled = true
+                    actionButton.isEnabled = !incompatible
                 }
                 secondaryButton.text =
                     getString(if (local.enabled) R.string.plugin_action_disable else R.string.plugin_action_enable)
@@ -402,9 +483,30 @@ class PluginDetailsActivity : AppCompatActivity() {
             busy -> return
             local == null && e != null -> install(mgr)
             local != null && e != null && mgr.installer.updateAvailable(e, local) -> install(mgr)
-            local != null -> {
-                NoxsPluginRuntime.activate(applicationContext, local)
-                Toast.makeText(this, getString(R.string.plugin_opened_toast), Toast.LENGTH_SHORT).show()
+            local != null -> openWithSdk(mgr, local)
+        }
+    }
+
+    /** Opens (activates) an installed plugin through its verified SDK. */
+    private fun openWithSdk(mgr: NoxsPluginManager, local: InstalledPlugin) {
+        if (NoxsPluginRuntime.isActive(local.meta.id)) return
+        busy = true
+        renderActions(entry)
+        scope.launch(Dispatchers.IO) {
+            val runtime = mgr.sdkRuntimeJs(local)
+            scope.launch {
+                busy = false
+                if (runtime.js != null) {
+                    NoxsPluginRuntime.activate(applicationContext, local, runtime.js)
+                    Toast.makeText(this@PluginDetailsActivity, getString(R.string.plugin_opened_toast), Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        this@PluginDetailsActivity,
+                        runtime.message ?: getString(R.string.plugin_action_failed),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                load()
             }
         }
     }
@@ -448,22 +550,26 @@ class PluginDetailsActivity : AppCompatActivity() {
         renderActions(entry)
         scope.launch(Dispatchers.IO) {
             val outcome = runCatching { mgr.install(pluginId) { /* progress */ } }
+            val runtime = outcome.getOrNull()?.let { mgr.sdkRuntimeJs(it) }
             scope.launch {
                 busy = false
                 outcome
                     .onSuccess { installed ->
-                        NoxsPluginRuntime.activate(applicationContext, installed)
+                        if (runtime?.js != null) {
+                            NoxsPluginRuntime.activate(applicationContext, installed, runtime.js)
+                        }
                         Toast.makeText(
                             this@PluginDetailsActivity,
-                            getString(R.string.plugin_installed_toast, installed.meta.name),
+                            runtime?.message
+                                ?: getString(R.string.plugin_installed_toast, installed.meta.name),
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                    .onFailure {
+                    .onFailure { failure ->
                         Toast.makeText(
                             this@PluginDetailsActivity,
-                            getString(R.string.plugin_install_failed_toast),
-                            Toast.LENGTH_SHORT
+                            failure.message ?: getString(R.string.plugin_install_failed_toast),
+                            Toast.LENGTH_LONG
                         ).show()
                     }
                 load()

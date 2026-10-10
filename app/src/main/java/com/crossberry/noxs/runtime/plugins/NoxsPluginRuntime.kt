@@ -51,7 +51,8 @@ object NoxsPluginRuntime {
     private class RuntimeHandle(
         val pluginId: String,
         val permissions: Set<String>,
-        val webView: WebView
+        val webView: WebView,
+        val storageFile: File?
     )
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -70,25 +71,46 @@ object NoxsPluginRuntime {
 
     // ------------------------------------------------------------ lifecycle
 
-    /** Activates a plugin: private WebView + plugin.js + activate(noxs). */
-    fun activate(context: Context, plugin: InstalledPlugin) {
-        if (routines().containsKey(plugin.meta.id)) return
+    /**
+     * Activates a plugin: private WebView + Noxs Plugin SDK bootstrap (when
+     * the plugin declares an SDK) + plugin.js + activate(noxs).
+     *
+     * [sdkJs] is the verified SDK index.js for the plugin's selected SDK
+     * release (from NoxsPluginManager.sdkRuntimeJs). A plugin developed on
+     * an SDK newer than 0.0.1 is never executed without its SDK: activation
+     * is refused and false returned — code never runs unvalidated.
+     *
+     * @return true when the plugin was activated.
+     */
+    fun activate(context: Context, plugin: InstalledPlugin, sdkJs: String? = null): Boolean {
+        if (routines().containsKey(plugin.meta.id)) return true
+        val declaredSdk = PluginSemver.parse(plugin.meta.sdkVersion) ?: PluginSemver.ZERO
+        if (declaredSdk > PluginSemver(0, 0, 1) && sdkJs == null) {
+            NoxsLog.w(TAG, "plugin ${plugin.meta.id} requires Noxs Plugin SDK ${plugin.meta.sdkVersion} — refusing to run unverified")
+            return false
+        }
         val pluginJs = runCatching {
             java.io.File(plugin.dir, PluginJson.RUNTIME_ENTRY).readText(Charsets.UTF_8)
         }.getOrElse {
             NoxsLog.w(TAG, "plugin ${plugin.meta.id} has no readable entry")
-            return
+            return false
         }
         mainHandler.post {
             runCatching {
-                val webView = buildRuntimeWebView(context.applicationContext, plugin, pluginJs)
-                runtimes[plugin.meta.id] = RuntimeHandle(plugin.meta.id, plugin.meta.permissions.toSet(), webView)
+                val webView = buildRuntimeWebView(context.applicationContext, plugin, pluginJs, sdkJs)
+                runtimes[plugin.meta.id] = RuntimeHandle(
+                    plugin.meta.id,
+                    plugin.meta.permissions.toSet(),
+                    webView,
+                    java.io.File(plugin.dir, PluginStorageFile.FILE_NAME)
+                )
                 NoxsLog.i(TAG, "plugin activating: ${plugin.meta.id}")
             }.onFailure {
                 NoxsLog.w(TAG, "activation error (${it.javaClass.simpleName})")
                 runtimes.remove(plugin.meta.id)
             }
         }
+        return true
     }
 
     fun deactivate(pluginId: String) {
@@ -201,6 +223,33 @@ object NoxsPluginRuntime {
         return true
     }
 
+    /**
+     * sdk.storage get/set/remove/keys — the host side of the SDK "storage"
+     * feature (Noxs Plugin SDK 0.0.2+). Requires the storage permission;
+     * data lives in the plugin's own directory and is removed with it.
+     * Returns the JSON-encoded value for "get" (null on miss), a JSON array
+     * for "keys", null otherwise. Bounded by PluginStorageFile.
+     */
+    fun storageOp(pluginId: String, op: String, key: String, value: String): String? {
+        requirePermission(pluginId, PluginPermissions.STORAGE)
+        val file = routines()[pluginId]?.storageFile ?: return null
+        val data = PluginStorageFile.load(file)
+        val safeKey = key.take(PluginStorageFile.MAX_KEY_LENGTH)
+        return when (op) {
+            "get" -> data[safeKey]?.let { JSONObject.quote(it) }
+            "set" -> {
+                if (value.length > PluginStorageFile.MAX_VALUE_BYTES) return null
+                if (PluginStorageFile.store(file, data + (safeKey to value))) "\"ok\"" else null
+            }
+            "remove" -> {
+                PluginStorageFile.store(file, data - safeKey)
+                "\"ok\""
+            }
+            "keys" -> JSONObject(data.keys.toList()).toString()
+            else -> null
+        }
+    }
+
     fun windowTitle(windowId: String): String? = windows[windowId]?.title
 
     fun handleFor(windowId: String): WindowHandle? = windows[windowId]
@@ -225,7 +274,8 @@ object NoxsPluginRuntime {
     private fun buildRuntimeWebView(
         context: Context,
         plugin: InstalledPlugin,
-        pluginJs: String
+        pluginJs: String,
+        sdkJs: String?
     ): WebView {
         val webView = WebView(context)
         configure(webView)
@@ -238,10 +288,13 @@ object NoxsPluginRuntime {
             override fun onPageFinished(view: WebView, url: String) {
                 if (booted) return
                 booted = true
-                // Inject only once the blank page exists: shim -> plugin.js
-                // -> activate(noxs). Every step is guarded so a broken
-                // plugin degrades to a log line, never a crash.
+                // Inject only once the blank page exists: shim -> SDK ->
+                // plugin.js -> activate(noxs). Every step is guarded so a
+                // broken plugin degrades to a log line, never a crash.
                 view.evaluateJavascript(BOOTSTRAP_JS, null)
+                if (sdkJs != null) {
+                    view.evaluateJavascript("(function(){(0,eval)(" + quote(sdkJs) + ");})();", null)
+                }
                 view.evaluateJavascript("(function(){(0,eval)(" + quote(pluginJs) + ");})();", null)
                 view.evaluateJavascript(
                     "try{ __NOXS_PLUGIN__.activate(noxs); }catch(e){ NoxsHost.log('activation failed: ' + e); }",
@@ -329,6 +382,11 @@ object NoxsPluginRuntime {
         fun exec(requestId: String, command: String): Boolean = guarded {
             NoxsPluginRuntime.exec(pluginId, requestId.take(64), command.take(2000))
         } ?: false
+
+        @JavascriptInterface
+        fun storageOp(op: String, key: String, value: String): String? = guarded {
+            NoxsPluginRuntime.storageOp(pluginId, op.take(16), key.take(PluginStorageFile.MAX_KEY_LENGTH), value)
+        }
 
         private fun <T> guarded(block: () -> T): T? = try {
             block()

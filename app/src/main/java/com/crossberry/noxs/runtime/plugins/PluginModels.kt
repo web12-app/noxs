@@ -71,7 +71,14 @@ data class PluginMeta(
     val commands: List<String>,
     val keywords: List<String>,
     val homepage: String?,
-    val repository: String?
+    val repository: String?,
+    /* Noxs Plugin SDK requirements (manifest §4). Legacy manifests without
+       these fields resolve to the initial stable SDK "0.0.1" — the exact
+       API surface they were built on, never anything newer. */
+    val sdkVersion: String = SdkRequirements.DEFAULT_SDK_VERSION,
+    val minimumSdkVersion: String? = null,
+    val maximumSdkVersion: String? = null,
+    val apiFeatures: List<String> = emptyList()
 ) {
     val semver: PluginSemver? get() = PluginSemver.parse(version)
 }
@@ -103,7 +110,12 @@ data class RegistryEntry(
     val author: String? = null,
     val license: String? = null,
     val repository: String? = null,
-    val commands: List<String> = emptyList()
+    val commands: List<String> = emptyList(),
+    /* Noxs Plugin SDK requirements (null = legacy entry → SDK 0.0.1). */
+    val sdkVersion: String? = null,
+    val minimumSdkVersion: String? = null,
+    val maximumSdkVersion: String? = null,
+    val apiFeatures: List<String> = emptyList()
 )
 
 /** A plugin installed under ~/.noxs/plugins/<id>/ inside the active rootfs. */
@@ -150,7 +162,11 @@ object PluginJson {
             commands = strings(map, "commands"),
             keywords = strings(map, "keywords"),
             homepage = str(map, "homepage"),
-            repository = str(map, "repository")
+            repository = str(map, "repository"),
+            sdkVersion = str(map, "sdkVersion") ?: SdkRequirements.DEFAULT_SDK_VERSION,
+            minimumSdkVersion = str(map, "minimumSdkVersion"),
+            maximumSdkVersion = str(map, "maximumSdkVersion"),
+            apiFeatures = strings(map, "apiFeatures")
         )
     }
 
@@ -186,7 +202,11 @@ object PluginJson {
                 author = str(p, "author"),
                 license = str(p, "license"),
                 repository = str(p, "repository"),
-                commands = strings(p, "commands")
+                commands = strings(p, "commands"),
+                sdkVersion = str(p, "sdkVersion"),
+                minimumSdkVersion = str(p, "minimumSdkVersion"),
+                maximumSdkVersion = str(p, "maximumSdkVersion"),
+                apiFeatures = strings(p, "apiFeatures")
             )
         }
         return format to plugins
@@ -219,6 +239,8 @@ object PluginValidation {
         if (PluginSemver.parse(meta.minimumNoxsVersion) == null) {
             problems += "minimumNoxsVersion: must be MAJOR.MINOR.PATCH"
         }
+        SdkRequirements.validate(meta.sdkVersion, meta.minimumSdkVersion, meta.maximumSdkVersion, meta.apiFeatures)
+            .forEach { problems += it }
         if (meta.logo != null && meta.logo.isBlank()) problems += "logo: must not be empty when set"
         if (meta.readme.isNullOrBlank()) problems += "readme: must point at the README file"
         return problems
