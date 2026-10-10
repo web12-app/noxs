@@ -35,6 +35,7 @@ for name, content, mirror in extract_nx.nx_shell_scripts(root):
               'ENV_LIB': 'noxs-pkg/env-lib.sh',
               'VPN_LIB': 'noxs-pkg/vpn-lib.sh',
               'PLUG_LIB': 'noxs-pkg/plug-lib.sh',
+              'CERT_FIX_LIB': 'noxs-pkg/cert-fix.sh',
               'AI_LIB': 'noxs-pkg/ai-lib.sh'}[name]
     target = dest / module
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -394,6 +395,18 @@ if [ "$LSOUT" = "nx: No packages installed." ]; then
 else
     fail "nx list with nothing installed (got: $LSOUT)"
 fi
+
+# ---- cert-fix dispatcher wiring ----------------------------------------------
+echo "=== cert-fix: dispatcher wiring ==="
+if [ -f "$NX_LIB_DIR/cert-fix.sh" ]; then pass "cert-fix.sh extracted"; else fail "cert-fix.sh extracted"; fi
+"$NXBIN" help | grep -q "nx cert-fix" && pass "nx help mentions cert-fix" || fail "nx help mentions cert-fix"
+"$NXBIN" cert-fix --help 2>&1 | grep -q "usage: nx cert-fix" && pass "cert-fix help" || fail "cert-fix help"
+"$NXBIN" cert-fix definitely-not-an-option >/dev/null 2>&1
+[ $? -eq 2 ] && pass "cert-fix rejects unknown args" || fail "cert-fix rejects unknown args"
+grep -q "cf_use_http" "$NX_LIB_DIR/cert-fix.sh" && grep -q "cf_use_https" "$NX_LIB_DIR/cert-fix.sh" \
+    && pass "cert-fix has HTTP fallback + HTTPS restore" || fail "cert-fix transport helpers"
+grep -q "the same failure repeated" "$NX_LIB_DIR/cert-fix.sh" \
+    && pass "cert-fix identical-failure abort present" || fail "cert-fix identical-failure abort"
 
 # ---- ai dispatcher wiring ----------------------------------------------------
 echo "=== ai: dispatcher wiring ==="
