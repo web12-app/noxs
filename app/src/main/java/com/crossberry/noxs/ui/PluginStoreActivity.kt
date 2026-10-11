@@ -18,6 +18,7 @@ package com.crossberry.noxs.ui
 
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -50,6 +51,11 @@ import java.util.concurrent.ConcurrentHashMap
 class PluginStoreActivity : AppCompatActivity() {
 
     enum class Filter { ALL, INSTALLED, UPDATES, COMPATIBLE, APP_UPDATE, INCOMPATIBLE, BLOCKED }
+
+    companion object {
+        /** Where "Update Noxs" sends the user when this build is too old for a plugin. */
+        const val RELEASES_URL = "https://github.com/web12-app/noxs/releases/latest"
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var manager: NoxsPluginManager? = null
@@ -557,6 +563,17 @@ class PluginCardAdapter(
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { marginStart = (8 * dp).toInt() }
+                // The gate can only be cleared by running a newer Noxs — send the
+                // user to the release page instead of being a dead label.
+                setOnClickListener {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(PluginStoreActivity.RELEASES_URL))
+                        )
+                    }.onFailure {
+                        Toast.makeText(context, R.string.plugin_action_failed, Toast.LENGTH_SHORT).show()
+                    }
+                }
             })
             return
         }
