@@ -275,8 +275,14 @@ object RootfsConfigurator {
     // 9: removes env-lib.sh + the `nx env` dispatcher (multi-OS environments
     //    retired; Debian 12 is the one environment). The migration deletes
     //    the stale guest lib so no orphan script lingers on existing installs.
+    // 10: rewrites cert-fix.sh — apt-get update is now verified beyond the
+    //    exit code (strict error mode + output scan + populated-lists check)
+    //    so the signed-HTTP fallback actually fires on fresh rootfs installs
+    //    without ca-certificates; dpkg recovery runs before the install;
+    //    a missing noxs.sources is self-healed; the terminal output uses a
+    //    scrollback-safe transcript instead of cursor-redrawn live boxes.
     // internal: asserted from unit tests (NoxsNxAiTest migration marker check)
-    internal val NX_PACKAGE_SYSTEM_VERSION = "9"
+    internal val NX_PACKAGE_SYSTEM_VERSION = "10"
 
     /** Guest lib files removed by a migration version — deleted on update. */
     private val RETIRED_LIB_FILES = listOf("env-lib.sh")

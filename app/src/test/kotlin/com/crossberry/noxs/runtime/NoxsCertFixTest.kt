@@ -36,9 +36,9 @@ class NoxsCertFixTest {
     private val cli get() = installed("usr/local/bin/nx").readText()
 
     @Test
-    fun `package system version is 9 - existing installs migrate without a reinstall`() {
-        assertEquals("9", RootfsConfigurator.NX_PACKAGE_SYSTEM_VERSION)
-        assertEquals("9\n", installed("usr/local/share/noxs-pkg/.nx-version").readText())
+    fun `package system version is 10 - existing installs migrate without a reinstall`() {
+        assertEquals("10", RootfsConfigurator.NX_PACKAGE_SYSTEM_VERSION)
+        assertEquals("10\n", installed("usr/local/share/noxs-pkg/.nx-version").readText())
     }
 
     @Test
@@ -115,5 +115,43 @@ class NoxsCertFixTest {
     fun `cert-fix help is reachable and arguments are rejected`() {
         assertTrue(certFix.contains("-h|--help|help"))
         assertTrue(certFix.contains("unknown argument"))
+    }
+
+    @Test
+    fun `cert-fix update success requires proof beyond the exit code`() {
+        // apt exits 0 in warn mode even when index downloads failed — the
+        // guest repair must apply the app-side policy (strict error mode,
+        // output scan, populated lists) before trusting an update, or the
+        // signed-HTTP fallback never fires on a fresh rootfs.
+        assertTrue(certFix.contains("APT::Update::Error-Mode=any"))
+        assertTrue(certFix.contains("cf_output_failed"))
+        assertTrue(certFix.contains("some index files failed"))
+        assertTrue(certFix.contains("certificate verification failed"))
+        assertTrue(certFix.contains("cf_lists_ok"))
+        assertTrue(certFix.contains("package lists are still empty"))
+    }
+
+    @Test
+    fun `cert-fix repairs dpkg state and diagnoses failed installs`() {
+        assertTrue(certFix.contains("/usr/bin/dpkg --configure -a"))
+        assertTrue(certFix.contains("dpkg --audit"))
+        assertTrue(certFix.contains("df -h /"))
+    }
+
+    @Test
+    fun `cert-fix self-heals a missing noxs sources file`() {
+        assertTrue(certFix.contains("recreating the canonical Noxs sources"))
+        assertTrue(certFix.contains("cf_write_sources"))
+        assertTrue(certFix.contains("Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"))
+        assertTrue(certFix.contains("URIs: https://security.debian.org/debian-security"))
+    }
+
+    @Test
+    fun `cert-fix output is scrollback-safe (no cursor redraw escapes)`() {
+        // The old in-place live box (ESC[s / ESC[u redraws) garbles when the
+        // terminal view scrolls during a multi-line redraw. The transcript
+        // plus final summary box must not emit ANY escape sequences.
+        assertFalse(certFix.contains("\u001B"))
+        assertTrue(certFix.contains("NOXS - CERT-FIX RESULT"))
     }
 }
